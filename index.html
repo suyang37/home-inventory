@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="物品管理">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#07c160">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <title>家庭物品管理</title>
+  <link rel="stylesheet" href="css/style.css?v=2">
+</head>
+<body>
+  <div id="app">
+    <!-- ==================== 首页 ==================== -->
+    <div id="page-index" class="page active">
+      <div class="page-header">
+        <h1>🏠 家庭物品管理</h1>
+      </div>
+      <div class="page-content">
+        <div class="stats-grid">
+          <div class="stat-item stat-total">
+            <div class="stat-number" id="statTotal">0</div>
+            <div class="stat-label">全部</div>
+          </div>
+          <div class="stat-item stat-normal">
+            <div class="stat-number" id="statNormal">0</div>
+            <div class="stat-label">正常</div>
+          </div>
+          <div class="stat-item stat-expiring">
+            <div class="stat-number" id="statExpiring">0</div>
+            <div class="stat-label">即将过期</div>
+          </div>
+          <div class="stat-item stat-expired">
+            <div class="stat-number" id="statExpired">0</div>
+            <div class="stat-label">已过期</div>
+          </div>
+        </div>
+
+        <div class="section-title">⏰ 即将过期</div>
+        <div class="card" id="expiringList">
+          <div class="empty-state">
+            <div class="empty-icon">✅</div>
+            <div class="empty-text">没有即将过期的物品</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 商品列表 ==================== -->
+    <div id="page-products" class="page">
+      <div class="page-header">
+        <h1>📦 商品列表</h1>
+      </div>
+      <div class="page-content">
+        <div class="card" id="productList">
+          <div class="empty-state">
+            <div class="empty-icon">📦</div>
+            <div class="empty-text">还没有商品</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 商品录入 ==================== -->
+    <div id="page-product-add" class="page">
+      <div class="page-header">
+        <button class="btn-back" onclick="Router.goBack()">←</button>
+        <h1>添加商品</h1>
+      </div>
+      <div class="page-content">
+        <form id="addForm" onsubmit="return false">
+          <!-- 拍照 -->
+          <div id="addImagePreview" class="image-preview" style="display:none">
+            <img src="" alt="预览">
+            <button type="button" class="remove-image" onclick="document.getElementById('addImagePreview').style.display='none';document.getElementById('addImageData').value=''">×</button>
+          </div>
+          <div class="camera-btn" onclick="takePhoto()">
+            <span class="camera-icon">📷</span>
+            <span class="camera-text">拍照识别商品</span>
+          </div>
+          <input type="hidden" id="addImageData">
+
+          <!-- OCR 结果 -->
+          <div id="addOcrResult" style="display:none"></div>
+
+          <!-- 商品名称 -->
+          <div class="form-group">
+            <label class="form-label">商品名称 *</label>
+            <input type="text" class="form-input" id="addName" placeholder="输入商品名称" required>
+          </div>
+
+          <!-- 分类 -->
+          <div class="form-group">
+            <label class="form-label">分类</label>
+            <div class="category-grid" id="addCategoryGrid"></div>
+          </div>
+
+          <!-- 位置 -->
+          <div class="form-group">
+            <label class="form-label">存放位置</label>
+            <select class="form-select" id="addLocation"></select>
+          </div>
+
+          <!-- 数量 -->
+          <div class="form-group">
+            <label class="form-label">数量</label>
+            <input type="number" class="form-input" id="addQuantity" value="1" min="1">
+          </div>
+
+          <!-- 生产日期 + 保质期 -->
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">生产日期</label>
+              <input type="date" class="form-input" id="addProductionDate">
+            </div>
+            <div class="form-group">
+              <label class="form-label">保质期</label>
+              <div class="form-row">
+                <input type="number" class="form-input" id="addShelfLife" placeholder="数值" style="flex:1">
+                <select class="form-select" id="addShelfLifeUnit" style="width:80px;flex:none"></select>
+              </div>
+            </div>
+          </div>
+
+          <!-- 过期日期 -->
+          <div class="form-group">
+            <label class="form-label">过期日期</label>
+            <input type="date" class="form-input" id="addExpiryDate">
+          </div>
+
+          <!-- 备注 -->
+          <div class="form-group">
+            <label class="form-label">备注</label>
+            <textarea class="form-textarea" id="addNotes" placeholder="备注信息（可选）" rows="3"></textarea>
+          </div>
+
+          <button type="button" class="btn btn-primary btn-block btn-lg" onclick="submitProduct()">✅ 保存商品</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- ==================== 商品详情 ==================== -->
+    <div id="page-product-detail" class="page">
+      <div class="page-header">
+        <button class="btn-back" onclick="Router.goBack()">←</button>
+        <h1 id="detailHeader">商品详情</h1>
+      </div>
+      <div class="page-content">
+        <div class="card" id="detailContent"></div>
+        <div class="action-bar" id="detailActions"></div>
+      </div>
+    </div>
+
+    <!-- ==================== 商品编辑 ==================== -->
+    <div id="page-product-edit" class="page">
+      <div class="page-header">
+        <button class="btn-back" onclick="Router.goBack()">←</button>
+        <h1 id="editHeader">编辑商品</h1>
+      </div>
+      <div class="page-content">
+        <form id="editForm" onsubmit="return false">
+          <div class="form-group">
+            <label class="form-label">商品名称 *</label>
+            <input type="text" class="form-input" id="editName" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">分类</label>
+            <div class="category-grid" id="editCategoryGrid"></div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">存放位置</label>
+            <select class="form-select" id="editLocation"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">数量</label>
+            <input type="number" class="form-input" id="editQuantity" min="1">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">生产日期</label>
+              <input type="date" class="form-input" id="editProductionDate">
+            </div>
+            <div class="form-group">
+              <label class="form-label">保质期</label>
+              <div class="form-row">
+                <input type="number" class="form-input" id="editShelfLife" style="flex:1">
+                <select class="form-select" id="editShelfLifeUnit" style="width:80px;flex:none"></select>
+              </div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">过期日期</label>
+            <input type="date" class="form-input" id="editExpiryDate">
+          </div>
+          <div class="form-group">
+            <label class="form-label">备注</label>
+            <textarea class="form-textarea" id="editNotes" rows="3"></textarea>
+          </div>
+          <button type="button" class="btn btn-primary btn-block btn-lg" onclick="submitEdit()">💾 保存修改</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- ==================== 位置管理 ==================== -->
+    <div id="page-locations" class="page">
+      <div class="page-header">
+        <h1>📁 位置管理</h1>
+      </div>
+      <div class="page-content">
+        <div class="card">
+          <ul class="tree-list" id="locationTree">
+            <div class="empty-state">
+              <div class="empty-icon">🏠</div>
+              <div class="empty-text">还没有位置</div>
+            </div>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 位置详情 ==================== -->
+    <div id="page-location-detail" class="page">
+      <div class="page-header">
+        <button class="btn-back" onclick="Router.goBack()">←</button>
+        <h1 id="locDetailHeader">位置详情</h1>
+      </div>
+      <div class="page-content">
+        <div class="section-title">📁 子位置</div>
+        <div class="card" id="locChildren"></div>
+
+        <div class="section-title">📦 物品列表</div>
+        <div class="card" id="locProducts"></div>
+
+        <div class="action-bar" id="locActions"></div>
+      </div>
+    </div>
+
+    <!-- ==================== 搜索 ==================== -->
+    <div id="page-search" class="page">
+      <div class="page-header">
+        <h1>🔍 查找物品</h1>
+      </div>
+      <div class="page-content">
+        <div class="search-bar">
+          <span class="search-icon">🔍</span>
+          <input type="search" id="searchInput" placeholder="搜索商品名称、位置..." oninput="doSearch()">
+        </div>
+
+        <div id="searchHistory">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <span style="font-size:13px;color:var(--text-secondary)">搜索历史</span>
+            <button class="btn btn-sm btn-secondary" onclick="clearSearchHistory()">清除</button>
+          </div>
+          <div class="history-tags" id="searchHistoryTags"></div>
+        </div>
+
+        <div id="searchResults"></div>
+      </div>
+    </div>
+
+    <!-- ==================== 个人中心 ==================== -->
+    <div id="page-mine" class="page">
+      <div class="page-header">
+        <h1>👤 我的</h1>
+      </div>
+      <div class="page-content">
+        <div class="mine-header">
+          <div class="avatar">👤</div>
+          <div class="nickname">家庭管理员</div>
+        </div>
+
+        <div class="card" id="mineStats"></div>
+
+        <div class="mine-menu">
+          <div class="mine-menu-item" onclick="exportData()">
+            <span class="menu-icon">📤</span>
+            <span class="menu-text">导出数据备份</span>
+            <span class="menu-arrow">›</span>
+          </div>
+          <div class="mine-menu-item" onclick="importData()">
+            <span class="menu-icon">📥</span>
+            <span class="menu-text">导入数据备份</span>
+            <span class="menu-arrow">›</span>
+          </div>
+          <div class="mine-menu-item" onclick="clearAllData()" style="color:var(--danger)">
+            <span class="menu-icon">🗑️</span>
+            <span class="menu-text">清除所有数据</span>
+            <span class="menu-arrow">›</span>
+          </div>
+        </div>
+
+        <div style="text-align:center;padding:24px 0;color:var(--text-light);font-size:12px">
+          家庭物品管理 v1.0<br>
+          数据存储在本地，清除浏览器缓存会丢失数据
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 位置添加弹窗 ==================== -->
+    <div id="locationForm" style="display:none;position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:#fff;border-radius:16px 16px 0 0;box-shadow:0 -4px 20px rgba(0,0,0,0.15);z-index:200;padding:20px;padding-bottom:calc(20px + env(safe-area-inset-bottom))">
+      <h3 id="locationFormTitle" style="margin-bottom:16px;font-size:16px">添加位置</h3>
+      <input type="hidden" id="addLocationParentId">
+      <div class="form-group">
+        <label class="form-label">位置名称</label>
+        <input type="text" class="form-input" id="addLocationName" placeholder="如：客厅、冰箱、抽屉">
+      </div>
+      <div class="action-bar">
+        <button class="btn btn-secondary" onclick="document.getElementById('locationForm').style.display='none'">取消</button>
+        <button class="btn btn-primary" onclick="submitLocation()">确定</button>
+      </div>
+    </div>
+
+    <!-- ==================== 底部 Tab 导航 ==================== -->
+    <div class="tab-bar">
+      <button class="tab-item active" data-page="index" onclick="Router.navigate('index')">
+        <span class="tab-icon">🏠</span>
+        <span class="tab-label">首页</span>
+      </button>
+      <button class="tab-item" data-page="products" onclick="Router.navigate('products')">
+        <span class="tab-icon">📦</span>
+        <span class="tab-label">商品</span>
+      </button>
+      <button class="tab-item" data-page="product-add" onclick="Router.navigate('product-add')">
+        <span class="tab-icon">➕</span>
+        <span class="tab-label">添加</span>
+      </button>
+      <button class="tab-item" data-page="locations" onclick="Router.navigate('locations')">
+        <span class="tab-icon">📁</span>
+        <span class="tab-label">位置</span>
+      </button>
+      <button class="tab-item" data-page="search" onclick="Router.navigate('search')">
+        <span class="tab-icon">🔍</span>
+        <span class="tab-label">查找</span>
+      </button>
+      <button class="tab-item" data-page="mine" onclick="Router.navigate('mine')">
+        <span class="tab-icon">👤</span>
+        <span class="tab-label">我的</span>
+      </button>
+    </div>
+  </div>
+
+  <script src="js/constants.js?v=2"></script>
+  <script src="js/db.js?v=2"></script>
+  <script src="js/util.js?v=2"></script>
+  <script src="js/app.js?v=2"></script>
+</body>
+</html>

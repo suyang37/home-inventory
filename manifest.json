@@ -1,0 +1,28 @@
+{
+  "name": "家庭物品管理",
+  "short_name": "物品管理",
+  "description": "管理家庭物品的保质期和存放位置",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#07c160",
+  "theme_color": "#07c160",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
