@@ -1497,6 +1497,103 @@ body {
 }
 
 /* ========================================
+   批量管理模式
+   ======================================== */
+.batch-action-bar {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.batch-select-all {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.batch-select-all input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}
+
+.batch-count {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.batch-delete-btn {
+  padding: 6px 14px;
+  background: var(--danger);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.batch-delete-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.batch-cancel-btn {
+  padding: 6px 14px;
+  background: var(--bg-page);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* 批量模式下的商品项 */
+.product-item .product-checkbox {
+  display: flex;
+  align-items: center;
+  padding-right: 4px;
+}
+
+.checkbox-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.product-item.selected {
+  background: #f0faf0;
+}
+
+/* ========================================
+   表单复选框
+   ======================================== */
+.form-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.form-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+}
+
+/* ========================================
    响应式
    ======================================== */
 @media (min-width: 480px) {

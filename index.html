@@ -8,8 +8,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>家庭物品管理</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="css/style.css?v=4">
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <link rel="stylesheet" href="css/style.css?v=5">
 </head>
 <body>
   <div id="app">
@@ -63,19 +62,30 @@
       </div>
     </div>
 
-    <!-- ========== 商品列表 ========== -->
+    <!-- ========== 物品列表 ========== -->
     <div id="page-products" class="page">
       <div class="page-header">
-        <div class="header-title">商品列表</div>
+        <div class="header-title">物品列表</div>
+        <button class="header-btn" id="batchManageBtn" onclick="toggleBatchMode()" title="批量管理">📋</button>
       </div>
       <div class="page-content">
+        <!-- 批量操作栏 -->
+        <div id="batchActionBar" class="batch-action-bar" style="display:none">
+          <label class="batch-select-all" onclick="toggleSelectAll()">
+            <input type="checkbox" id="selectAllCheckbox" />
+            <span>全选</span>
+          </label>
+          <span id="batchCount" class="batch-count">已选 0 项</span>
+          <button class="batch-delete-btn" id="batchDeleteBtn" onclick="batchDelete()" disabled>🗑️ 删除选中</button>
+          <button class="batch-cancel-btn" onclick="toggleBatchMode()">取消</button>
+        </div>
         <div class="card" id="productList">
           <div id="productItems"></div>
         </div>
       </div>
     </div>
 
-    <!-- ========== 添加商品 ========== -->
+    <!-- ========== 添加物品 ========== -->
     <div id="page-product-add" class="page">
       <div class="page-header">
         <button class="btn-back" onclick="Router.back()">← 返回</button>
@@ -88,7 +98,7 @@
             <button type="button" class="image-preview-remove" onclick="removeAddImage()">×</button>
           </div>
           <div class="camera-btn" onclick="takePhoto()">
-            📷 拍照识别（OCR）
+            📷 拍照识别（AI）
           </div>
           <input type="hidden" id="addImageData">
           <div class="form-group">
@@ -122,6 +132,10 @@
                   <option value="years">年</option>
                 </select>
               </div>
+              <label class="form-checkbox" style="margin-top:6px">
+                <input type="checkbox" id="addNoExpiry" onchange="toggleNoExpiry('add')" />
+                <span>无保质期（如衣物、工具等）</span>
+              </label>
             </div>
           </div>
           <div class="form-group">
@@ -133,11 +147,11 @@
       </div>
     </div>
 
-    <!-- ========== 商品详情 ========== -->
+    <!-- ========== 物品详情 ========== -->
     <div id="page-product-detail" class="page">
       <div class="page-header">
         <button class="btn-back" onclick="Router.back()">← 返回</button>
-        <div class="header-title" id="detailHeader">商品详情</div>
+        <div class="header-title" id="detailHeader">物品详情</div>
       </div>
       <div class="page-content">
         <div id="detailContent"></div>
@@ -145,7 +159,7 @@
       </div>
     </div>
 
-    <!-- ========== 编辑商品 ========== -->
+    <!-- ========== 编辑物品 ========== -->
     <div id="page-product-edit" class="page">
       <div class="page-header">
         <button class="btn-back" onclick="Router.back()">← 返回</button>
@@ -184,6 +198,10 @@
                   <option value="years">年</option>
                 </select>
               </div>
+              <label class="form-checkbox" style="margin-top:6px">
+                <input type="checkbox" id="editNoExpiry" onchange="toggleNoExpiry('edit')" />
+                <span>无保质期（如衣物、工具等）</span>
+              </label>
             </div>
           </div>
           <div class="form-group">
@@ -231,6 +249,14 @@
           </div>
         </div>
 
+        <!-- AI 识别配置 -->
+        <div class="mine-section">
+          <div class="mine-section-title">🤖 AI 识别配置</div>
+          <div id="mineAISection">
+            <!-- 由 JS 动态渲染 -->
+          </div>
+        </div>
+
         <!-- 位置管理 -->
         <div class="mine-section">
           <div class="mine-section-title">📍 位置管理</div>
@@ -270,7 +296,7 @@
         </div>
 
         <!-- 版本信息 -->
-        <div class="mine-version">家庭物品管理 v4.0 · 数据存储在本地</div>
+        <div class="mine-version">家庭物品管理 v5.0 · 数据存储在本地</div>
       </div>
     </div>
 
@@ -307,7 +333,7 @@
       </button>
       <button class="tab-item" data-page="products" onclick="Router.navigate('products')">
         <span class="tab-icon">📦</span>
-        <span class="tab-label">商品</span>
+        <span class="tab-label">物品</span>
       </button>
       <button class="tab-item" data-page="locations" onclick="Router.navigate('locations')">
         <span class="tab-icon">📍</span>
@@ -320,11 +346,12 @@
     </div>
   </div>
 
-  <script src="js/constants.js?v=4"></script>
-  <script src="js/db.js?v=4"></script>
-  <script src="js/util.js?v=4"></script>
-  <script src="js/family.js?v=4"></script>
-  <script src="js/sync.js?v=4"></script>
-  <script src="js/app.js?v=4"></script>
+  <script src="js/constants.js?v=5"></script>
+  <script src="js/db.js?v=5"></script>
+  <script src="js/util.js?v=5"></script>
+  <script src="js/family.js?v=5"></script>
+  <script src="js/sync.js?v=5"></script>
+  <script src="js/ai.js?v=5"></script>
+  <script src="js/app.js?v=5"></script>
 </body>
 </html>

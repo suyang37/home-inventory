@@ -1,6 +1,6 @@
 /**
  * 家庭物品管理 - 主应用逻辑
- * 版本: 4.0
+ * 版本: 5.0
  */
 
 // ========================================
@@ -263,8 +263,11 @@ function highlightKeyword(text, keyword) {
 }
 
 // ========================================
-// 商品列表
+// 物品列表
 // ========================================
+let batchMode = false;
+let selectedIds = new Set();
+
 PageHandlers.products = async function() {
   const products = (await db.collection(DB.PRODUCTS).get()).data;
   
@@ -286,15 +289,38 @@ PageHandlers.products = async function() {
     container.innerHTML = products.map(p => {
       const info = getExpiryInfo(p.expiryDate);
       const cat = CATEGORIES.find(c => c.id === p.category) || CATEGORIES[CATEGORIES.length - 1];
+      const isSelected = selectedIds.has(p._id);
+      const expiryText = p.noExpiry ? '无保质期' : formatDate(p.expiryDate);
+      const statusText = p.noExpiry ? '—' : info.text;
+      const statusClass = p.noExpiry ? 'tag-normal' : EXPIRY_STATUS_CLASS[info.status];
+      
+      if (batchMode) {
+        return `
+          <div class="product-item ${isSelected ? 'selected' : ''}" onclick="toggleSelectItem('${p._id}')">
+            <div class="product-checkbox">
+              <span class="checkbox-icon ${isSelected ? 'checked' : ''}">${isSelected ? '✅' : '⬜'}</span>
+            </div>
+            <div class="product-icon">${cat.icon}</div>
+            <div class="product-info">
+              <div class="product-name">${p.name}</div>
+              <div class="product-meta">${p.locationName || '未设置位置'} · ${expiryText}</div>
+            </div>
+            <div class="product-right">
+              <span class="tag ${statusClass}">${statusText}</span>
+            </div>
+          </div>
+        `;
+      }
+      
       return `
         <div class="product-item" onclick="Router.navigate('product-detail-${p._id}')">
           <div class="product-icon">${cat.icon}</div>
           <div class="product-info">
             <div class="product-name">${p.name}</div>
-            <div class="product-meta">${p.locationName || '未设置位置'} · ${formatDate(p.expiryDate)}</div>
+            <div class="product-meta">${p.locationName || '未设置位置'} · ${expiryText}</div>
           </div>
           <div class="product-right">
-            <span class="tag ${EXPIRY_STATUS_CLASS[info.status]}">${info.text}</span>
+            <span class="tag ${statusClass}">${statusText}</span>
           </div>
         </div>
       `;
@@ -302,80 +328,70 @@ PageHandlers.products = async function() {
   }
 };
 
-// ========================================
-// OCR 识别 - 使用 Tesseract.js
-// ========================================
-
-// 中文物品关键词库
-const PRODUCT_KEYWORDS = [
-  // 肉类
-  { keywords: ['鸡肉', '鸡胸肉', '鸡腿', '鸡翅', '鸡爪', '鸡', '猪肉', '牛肉', '羊肉', '排骨', '五花肉', '瘦肉', '肉'], category: 'meat', name: '肉类' },
-  // 海鲜
-  { keywords: ['鱼', '虾', '蟹', '海鲜', '带鱼', '鲈鱼', '三文鱼', '鱿鱼', '蛤蜊', '贝'], category: 'seafood', name: '海鲜' },
-  // 蔬菜
-  { keywords: ['白菜', '青菜', '菠菜', '生菜', '油麦菜', '空心菜', '西兰花', '花菜', '番茄', '西红柿', '黄瓜', '土豆', '萝卜', '胡萝卜', '茄子', '豆角', '辣椒', '葱', '姜', '蒜', '蔬菜', '菜'], category: 'vegetable', name: '蔬菜' },
-  // 水果
-  { keywords: ['苹果', '香蕉', '橙子', '橘子', '葡萄', '草莓', '西瓜', '哈密瓜', '芒果', '菠萝', '猕猴桃', '梨', '桃', '樱桃', '柠檬', '水果'], category: 'fruit', name: '水果' },
-  // 乳制品
-  { keywords: ['牛奶', '酸奶', '奶酪', '芝士', '黄油', '奶油', '乳'], category: 'dairy', name: '乳制品' },
-  // 蛋类
-  { keywords: ['鸡蛋', '鸭蛋', '鹌鹑蛋', '蛋', '皮蛋', '咸蛋'], category: 'egg', name: '蛋类' },
-  // 豆制品
-  { keywords: ['豆腐', '豆干', '豆皮', '腐竹', '豆浆', '豆'], category: 'tofu', name: '豆制品' },
-  // 调味品
-  { keywords: ['酱油', '醋', '盐', '糖', '味精', '鸡精', '料酒', '生抽', '老抽', '蚝油', '豆瓣酱', '辣椒酱', '番茄酱', '调味', '调料', '油', '香油', '橄榄油'], category: 'condiment', name: '调味品' },
-  // 主食
-  { keywords: ['大米', '米', '面粉', '面条', '挂面', '方便面', '面包', '馒头', '包子', '饺子', '馄饨', '米粉', '粉丝', '燕麦', '麦片'], category: 'staple', name: '主食' },
-  // 饮料
-  { keywords: ['可乐', '雪碧', '果汁', '茶', '咖啡', '饮料', '矿泉水', '水', '啤酒', '白酒', '红酒'], category: 'beverage', name: '饮料' },
-  // 零食
-  { keywords: ['薯片', '饼干', '巧克力', '糖果', '坚果', '瓜子', '花生', '辣条', '面包', '蛋糕', '零食'], category: 'snack', name: '零食' },
-  // 冷冻食品
-  { keywords: ['速冻', '冷冻', '冰淇淋', '雪糕', '冰棍', '冻'], category: 'frozen', name: '冷冻食品' },
-  // 罐头
-  { keywords: ['罐头', '午餐肉', '火腿', '香肠', '腊肠', '培根'], category: 'canned', name: '罐头/加工食品' },
-  // 干货
-  { keywords: ['木耳', '香菇', '蘑菇', '紫菜', '海带', '红枣', '枸杞', '桂圆', '干货', '干'], category: 'dry', name: '干货' },
-  // 药品
-  { keywords: ['药', '胶囊', '片', '口服液', '膏', '贴', '维生素', '钙'], category: 'medicine', name: '药品' },
-  // 日用品
-  { keywords: ['纸巾', '纸', '洗衣液', '洗洁精', '洗发水', '沐浴露', '牙膏', '牙刷', '肥皂', '垃圾袋'], category: 'daily', name: '日用品' },
-];
-
-function matchProduct(text) {
-  if (!text) return null;
-  
-  const lowerText = text.toLowerCase();
-  
-  // 按关键词匹配
-  for (const item of PRODUCT_KEYWORDS) {
-    for (const keyword of item.keywords) {
-      if (lowerText.includes(keyword.toLowerCase())) {
-        return item;
-      }
-    }
-  }
-  
-  return null;
+// 批量管理
+function toggleBatchMode() {
+  batchMode = !batchMode;
+  selectedIds.clear();
+  document.getElementById('batchActionBar').style.display = batchMode ? 'flex' : 'none';
+  document.getElementById('batchManageBtn').textContent = batchMode ? '✅' : '📋';
+  updateBatchCount();
+  PageHandlers.products();
 }
 
-async function loadTesseract() {
-  if (window.Tesseract) return true;
-  
-  try {
-    // Tesseract.js v5 已通过 CDN 加载
-    if (typeof Tesseract === 'undefined') {
-      showToast('OCR 引擎加载失败', 'error');
-      return false;
-    }
-    window.Tesseract = Tesseract;
-    return true;
-  } catch (e) {
-    console.error('Tesseract 加载失败:', e);
-    showToast('OCR 引擎加载失败', 'error');
-    return false;
+function toggleSelectAll() {
+  const allChecked = document.getElementById('selectAllCheckbox').checked;
+  if (allChecked) {
+    // 全选 - 获取所有物品ID
+    db.collection(DB.PRODUCTS).get().then(result => {
+      result.data.forEach(p => selectedIds.add(p._id));
+      document.getElementById('selectAllCheckbox').checked = true;
+      updateBatchCount();
+      PageHandlers.products();
+    });
+  } else {
+    selectedIds.clear();
+    updateBatchCount();
+    PageHandlers.products();
   }
 }
+
+function toggleSelectItem(id) {
+  if (selectedIds.has(id)) {
+    selectedIds.delete(id);
+  } else {
+    selectedIds.add(id);
+  }
+  updateBatchCount();
+  PageHandlers.products();
+}
+
+function updateBatchCount() {
+  const count = selectedIds.size;
+  document.getElementById('batchCount').textContent = `已选 ${count} 项`;
+  document.getElementById('batchDeleteBtn').disabled = count === 0;
+}
+
+async function batchDelete() {
+  const count = selectedIds.size;
+  if (count === 0) return;
+  
+  const confirmed = await showConfirm('批量删除', `确定要删除选中的 ${count} 个物品吗？`);
+  if (!confirmed) return;
+  
+  showLoading('正在删除...');
+  for (const id of selectedIds) {
+    await db.collection(DB.PRODUCTS).doc(id).remove();
+  }
+  hideLoading();
+  
+  selectedIds.clear();
+  showToast(`已删除 ${count} 个物品`);
+  toggleBatchMode();
+}
+
+// ========================================
+// AI 识别 - 替代 OCR
+// ========================================
 
 async function takePhoto() {
   try {
@@ -402,8 +418,8 @@ async function takePhoto() {
     document.body.appendChild(captureBtn);
     document.body.appendChild(closeBtn);
 
-    const stream = await navigator.mediaDevices.getUserMedia({ 
-      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } 
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
     });
     video.srcObject = stream;
     await video.play();
@@ -433,62 +449,30 @@ async function takePhoto() {
         preview.style.display = 'block';
         document.getElementById('addImageData').value = compressedDataUrl;
 
-        showLoading('正在识别...');
+        showLoading('AI 识别中...');
 
         try {
-          const loaded = await loadTesseract();
-          if (!loaded) {
-            hideLoading();
-            resolve();
-            return;
-          }
-
-          const result = await window.Tesseract.recognize(
-            compressedDataUrl,
-            'chi_sim+eng',
-            {
-              logger: (m) => {
-                if (m.status === 'recognizing text') {
-                  console.log(`OCR 进度: ${Math.round(m.progress * 100)}%`);
-                }
-              }
-            }
-          );
-
+          const result = await AIClient.recognize(compressedDataUrl);
           hideLoading();
           
-          const text = result.data.text;
-          console.log('OCR 识别结果:', text);
-
-          if (text) {
-            // 尝试匹配商品
-            const matched = matchProduct(text);
-            if (matched) {
-              document.getElementById('addName').value = matched.name;
-              // 选中匹配的分类
-              const catItems = document.querySelectorAll('#addCategoryGrid .category-item');
-              catItems.forEach(item => {
-                if (item.dataset.id === matched.category) {
-                  item.classList.add('selected');
-                } else {
-                  item.classList.remove('selected');
-                }
-              });
-              showToast(`识别为: ${matched.name}`);
-            } else {
-              // 取第一行文字作为名称
-              const firstLine = text.split('\n').filter(line => line.trim())[0];
-              if (firstLine) {
-                document.getElementById('addName').value = firstLine.trim().substring(0, 50);
-                showToast('已填入识别文字，请确认');
+          if (result && result.name) {
+            document.getElementById('addName').value = result.name;
+            // 选中匹配的分类
+            const catItems = document.querySelectorAll('#addCategoryGrid .category-item');
+            catItems.forEach(item => {
+              if (item.dataset.id === result.category) {
+                item.classList.add('selected');
+              } else {
+                item.classList.remove('selected');
               }
-            }
+            });
+            showToast(`识别为: ${result.name}`);
           } else {
-            showToast('未识别到文字', 'error');
+            showToast('AI 未识别到物品，请手动输入', 'error');
           }
         } catch (err) {
           hideLoading();
-          console.error('OCR 识别失败:', err);
+          console.error('AI 识别失败:', err);
           showToast('识别失败，请手动输入', 'error');
         }
 
@@ -542,7 +526,7 @@ function removeAddImage() {
 }
 
 // ========================================
-// 提交商品
+// 提交物品
 // ========================================
 async function submitProduct() {
   const name = document.getElementById('addName').value.trim();
@@ -556,6 +540,7 @@ async function submitProduct() {
   
   const locationId = document.getElementById('addLocation').value;
   const quantity = parseInt(document.getElementById('addQuantity').value) || 1;
+  const noExpiry = document.getElementById('addNoExpiry').checked;
   const productionDate = document.getElementById('addProductionDate').value;
   const shelfLife = document.getElementById('addShelfLife').value;
   const shelfLifeUnit = document.getElementById('addShelfLifeUnit').value;
@@ -564,7 +549,7 @@ async function submitProduct() {
 
   // 计算过期日期
   let expiryDate = '';
-  if (productionDate && shelfLife) {
+  if (!noExpiry && productionDate && shelfLife) {
     expiryDate = calculateExpiryDate(productionDate, parseInt(shelfLife), shelfLifeUnit);
   }
 
@@ -587,9 +572,10 @@ async function submitProduct() {
     locationId,
     locationName,
     quantity,
-    productionDate,
-    shelfLife: shelfLife ? parseInt(shelfLife) : '',
-    shelfLifeUnit,
+    noExpiry: noExpiry || false,
+    productionDate: noExpiry ? '' : productionDate,
+    shelfLife: noExpiry ? '' : (shelfLife ? parseInt(shelfLife) : ''),
+    shelfLifeUnit: noExpiry ? '' : shelfLifeUnit,
     expiryDate,
     notes,
     image: finalImage,
@@ -606,7 +592,7 @@ async function submitProduct() {
 }
 
 // ========================================
-// 商品详情
+// 物品详情
 // ========================================
 PageHandlers['product-detail'] = async function() {
   const id = Router.currentPage.replace('product-detail-', '');
@@ -615,7 +601,7 @@ PageHandlers['product-detail'] = async function() {
   const result = await db.collection(DB.PRODUCTS).doc(id).get();
   const p = result.data;
   if (!p) {
-    showToast('商品不存在', 'error');
+    showToast('物品不存在', 'error');
     Router.navigate('products');
     return;
   }
@@ -624,6 +610,16 @@ PageHandlers['product-detail'] = async function() {
   const cat = CATEGORIES.find(c => c.id === p.category) || CATEGORIES[CATEGORIES.length - 1];
 
   document.getElementById('detailHeader').textContent = p.name;
+  
+  // 状态横幅 - 无保质期物品不显示
+  const statusBanner = p.noExpiry ? '' : `
+    <div class="detail-status-banner ${EXPIRY_STATUS_CLASS[info.status]}">
+      <span class="detail-status-icon">${info.status === 'expired' ? '❌' : info.status === 'expiring' ? '⚠️' : '✅'}</span>
+      <span>${info.text}</span>
+      <span class="detail-status-date">${formatDateCN(p.expiryDate)}</span>
+    </div>
+  `;
+
   document.getElementById('detailContent').innerHTML = `
     <!-- 图片区域 -->
     ${p.image ? `
@@ -632,12 +628,7 @@ PageHandlers['product-detail'] = async function() {
       </div>
     ` : ''}
     
-    <!-- 状态横幅 -->
-    <div class="detail-status-banner ${EXPIRY_STATUS_CLASS[info.status]}">
-      <span class="detail-status-icon">${info.status === 'expired' ? '❌' : info.status === 'expiring' ? '⚠️' : '✅'}</span>
-      <span>${info.text}</span>
-      <span class="detail-status-date">${formatDateCN(p.expiryDate)}</span>
-    </div>
+    ${statusBanner}
 
     <!-- 信息卡片 -->
     <div class="detail-info-card">
@@ -657,6 +648,12 @@ PageHandlers['product-detail'] = async function() {
         <span class="detail-info-label">🔢 数量</span>
         <span class="detail-info-value">${p.quantity} 件</span>
       </div>
+      ${p.noExpiry ? `
+      <div class="detail-info-row">
+        <span class="detail-info-label">⏳ 保质期</span>
+        <span class="detail-info-value" style="color:var(--text-light)">无保质期</span>
+      </div>
+      ` : `
       <div class="detail-info-row">
         <span class="detail-info-label">📅 生产日期</span>
         <span class="detail-info-value">${p.productionDate ? formatDateCN(p.productionDate) : '<span style="color:var(--text-light)">未知</span>'}</span>
@@ -669,6 +666,7 @@ PageHandlers['product-detail'] = async function() {
         <span class="detail-info-label">📆 过期日期</span>
         <span class="detail-info-value" style="font-weight:600;color:${EXPIRY_STATUS_COLOR[info.status]}">${formatDateCN(p.expiryDate)}</span>
       </div>
+      `}
       ${p.notes ? `
       <div class="detail-info-row detail-notes-row">
         <span class="detail-info-label">📝 备注</span>
@@ -718,7 +716,7 @@ async function deleteProduct(id) {
 }
 
 // ========================================
-// 编辑商品
+// 编辑物品
 // ========================================
 PageHandlers['product-edit'] = async function() {
   const id = Router.currentPage.replace('product-edit-', '');
@@ -727,7 +725,7 @@ PageHandlers['product-edit'] = async function() {
   const result = await db.collection(DB.PRODUCTS).doc(id).get();
   const p = result.data;
   if (!p) {
-    showToast('商品不存在', 'error');
+    showToast('物品不存在', 'error');
     Router.navigate('products');
     return;
   }
@@ -738,6 +736,16 @@ PageHandlers['product-edit'] = async function() {
   document.getElementById('editShelfLife').value = p.shelfLife || '';
   document.getElementById('editShelfLifeUnit').value = p.shelfLifeUnit || 'days';
   document.getElementById('editNotes').value = p.notes || '';
+
+  // 处理无保质期
+  const editNoExpiry = document.getElementById('editNoExpiry');
+  if (p.noExpiry) {
+    editNoExpiry.checked = true;
+    toggleNoExpiry('edit');
+  } else {
+    editNoExpiry.checked = false;
+    toggleNoExpiry('edit');
+  }
 
   renderCategoryGrid('editCategoryGrid', p.category);
   await renderLocationSelect('editLocation', p.locationId);
@@ -761,13 +769,14 @@ async function submitEdit() {
   
   const locationId = document.getElementById('editLocation').value;
   const quantity = parseInt(document.getElementById('editQuantity').value) || 1;
+  const noExpiry = document.getElementById('editNoExpiry').checked;
   const productionDate = document.getElementById('editProductionDate').value;
   const shelfLife = document.getElementById('editShelfLife').value;
   const shelfLifeUnit = document.getElementById('editShelfLifeUnit').value;
   const notes = document.getElementById('editNotes').value.trim();
 
   let expiryDate = '';
-  if (productionDate && shelfLife) {
+  if (!noExpiry && productionDate && shelfLife) {
     expiryDate = calculateExpiryDate(productionDate, parseInt(shelfLife), shelfLifeUnit);
   }
 
@@ -781,8 +790,11 @@ async function submitEdit() {
   await db.collection(DB.PRODUCTS).doc(id).update({
     data: {
       name, category, locationId, locationName, quantity,
-      productionDate, shelfLife: shelfLife ? parseInt(shelfLife) : '',
-      shelfLifeUnit, expiryDate, notes,
+      noExpiry: noExpiry || false,
+      productionDate: noExpiry ? '' : productionDate,
+      shelfLife: noExpiry ? '' : (shelfLife ? parseInt(shelfLife) : ''),
+      shelfLifeUnit: noExpiry ? '' : shelfLifeUnit,
+      expiryDate, notes,
       updatedAt: new Date().toISOString()
     }
   });
@@ -1140,6 +1152,9 @@ PageHandlers.mine = async function() {
 
   // 渲染云端同步状态
   renderSyncStatus();
+
+  // 渲染 AI 识别配置状态
+  renderAIStatus();
 };
 
 // ========================================
@@ -1399,6 +1414,203 @@ function disconnectSync() {
     SyncManager.disconnect();
     showToast('已断开连接');
     renderSyncStatus();
+  });
+}
+
+// ========================================
+// 无保质期切换
+// ========================================
+function toggleNoExpiry(prefix) {
+  const noExpiry = document.getElementById(prefix + 'NoExpiry').checked;
+  const shelfLifeRow = document.getElementById(prefix + 'ShelfLife').closest('.form-row');
+  const productionDateGroup = document.getElementById(prefix + 'ProductionDate').closest('.form-group');
+  
+  if (noExpiry) {
+    shelfLifeRow.style.display = 'none';
+    productionDateGroup.style.display = 'none';
+    document.getElementById(prefix + 'ProductionDate').value = '';
+    document.getElementById(prefix + 'ShelfLife').value = '';
+  } else {
+    shelfLifeRow.style.display = 'flex';
+    productionDateGroup.style.display = 'block';
+  }
+}
+
+// ========================================
+// AI 识别配置 UI
+// ========================================
+
+// 渲染 AI 配置状态
+function renderAIStatus() {
+  const container = document.getElementById('mineAISection');
+  const config = AIConfig.get();
+
+  if (!config) {
+    container.innerHTML = `
+      <div class="sync-status-card">
+        <div class="sync-status-row">
+          <span class="sync-label">状态</span>
+          <span class="sync-value"><span class="sync-status-dot disconnected"></span>未配置</span>
+        </div>
+        <div class="sync-actions">
+          <button class="btn btn-primary" onclick="showAIConfig()" style="flex:1">🤖 配置 AI</button>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  const presets = AIConfig.getPresets();
+  const preset = presets.find(p => p.id === config.provider);
+  const providerName = preset ? preset.name : config.provider;
+
+  container.innerHTML = `
+    <div class="sync-status-card">
+      <div class="sync-status-row">
+        <span class="sync-label">状态</span>
+        <span class="sync-value"><span class="sync-status-dot connected"></span>已配置</span>
+      </div>
+      <div class="sync-status-row">
+        <span class="sync-label">服务</span>
+        <span class="sync-value">${providerName}</span>
+      </div>
+      <div class="sync-actions">
+        <button class="btn btn-primary" onclick="showAIConfig()" style="flex:1">⚙️ 修改配置</button>
+      </div>
+      <div style="margin-top:8px;text-align:center">
+        <button class="btn btn-sm" onclick="disconnectAI()" style="color:var(--danger);background:none;border:none;font-size:12px;cursor:pointer">清除配置</button>
+      </div>
+    </div>
+  `;
+}
+
+// 显示 AI 配置弹窗
+function showAIConfig() {
+  const existing = document.querySelector('.sync-modal-overlay');
+  if (existing) existing.remove();
+
+  const presets = AIConfig.getPresets();
+  const currentConfig = AIConfig.get();
+  const selectedProvider = currentConfig ? currentConfig.provider : presets[0].id;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'sync-modal-overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+  overlay.innerHTML = `
+    <div class="sync-modal">
+      <div class="sync-modal-title">🤖 AI 识别配置</div>
+      <div class="sync-modal-desc" style="font-size:12px;color:var(--text-light);margin-bottom:12px">
+        选择 AI 服务商并填入你的 API Key，拍照识别时将自动调用 AI 识别物品
+      </div>
+      
+      <div class="sync-provider-list">
+        ${presets.map(p => `
+          <div class="sync-provider-item ${p.id === selectedProvider ? 'selected' : ''}"
+               data-provider="${p.id}"
+               onclick="selectAIProvider('${p.id}')">
+            <div class="sync-provider-icon">${p.icon}</div>
+            <div class="sync-provider-name">${p.name}</div>
+            <div class="sync-provider-desc">${p.desc}</div>
+          </div>
+        `).join('')}
+      </div>
+
+      <div class="sync-config-form" id="aiConfigForm">
+        <div class="form-group">
+          <label class="form-label">API Key</label>
+          <input type="password" class="form-input" id="aiApiKey" placeholder="请输入你的 API Key" />
+          <div class="form-hint" id="aiApiKeyHint">
+            你的 API Key 仅存储在本地浏览器中，不会上传到任何服务器
+          </div>
+        </div>
+      </div>
+
+      <div class="sync-modal-actions">
+        <button class="btn btn-secondary" onclick="this.closest('.sync-modal-overlay').remove()">取消</button>
+        <button class="btn btn-secondary" onclick="testAIConnection()">🔌 测试连接</button>
+        <button class="btn btn-primary" onclick="saveAIConfig()">💾 保存</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  // 填充已有配置
+  if (currentConfig) {
+    document.getElementById('aiApiKey').value = currentConfig.apiKey || '';
+  }
+}
+
+// 选择 AI 服务商
+function selectAIProvider(providerId) {
+  document.querySelectorAll('.sync-provider-item').forEach(item => {
+    item.classList.toggle('selected', item.dataset.provider === providerId);
+  });
+}
+
+// 测试 AI 连接
+async function testAIConnection() {
+  const selectedItem = document.querySelector('.sync-provider-item.selected');
+  if (!selectedItem) {
+    showToast('请选择 AI 服务商', 'error');
+    return;
+  }
+  const providerId = selectedItem.dataset.provider;
+  const apiKey = document.getElementById('aiApiKey').value.trim();
+
+  if (!apiKey) {
+    showToast('请输入 API Key', 'error');
+    return;
+  }
+
+  const testBtn = document.querySelector('.sync-modal-actions .btn-secondary:not(:first-child)');
+  const originalText = testBtn.textContent;
+  testBtn.textContent = '⏳ 测试中...';
+  testBtn.disabled = true;
+
+  // 临时保存配置进行测试
+  AIConfig.save({ provider: providerId, apiKey });
+  const result = await AIClient.test();
+
+  testBtn.textContent = originalText;
+  testBtn.disabled = false;
+
+  if (result.success) {
+    showToast('✅ 连接成功！');
+  } else {
+    showToast('❌ ' + (result.message || '连接失败'), 'error');
+  }
+}
+
+// 保存 AI 配置
+function saveAIConfig() {
+  const selectedItem = document.querySelector('.sync-provider-item.selected');
+  if (!selectedItem) {
+    showToast('请选择 AI 服务商', 'error');
+    return;
+  }
+  const providerId = selectedItem.dataset.provider;
+  const apiKey = document.getElementById('aiApiKey').value.trim();
+
+  if (!apiKey) {
+    showToast('请输入 API Key', 'error');
+    return;
+  }
+
+  AIConfig.save({ provider: providerId, apiKey });
+  showToast('配置已保存');
+  document.querySelector('.sync-modal-overlay')?.remove();
+  renderAIStatus();
+}
+
+// 清除 AI 配置
+function disconnectAI() {
+  showConfirm('清除配置', '确定要清除 AI 识别配置吗？').then(confirmed => {
+    if (!confirmed) return;
+    AIConfig.clear();
+    showToast('配置已清除');
+    renderAIStatus();
   });
 }
 

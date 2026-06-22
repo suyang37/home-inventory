@@ -15,6 +15,7 @@ const ASSETS_TO_CACHE = [
   'js/util.js',
   'js/family.js',
   'js/sync.js',
+  'js/ai.js',
   'js/app.js',
   'icons/icon-192.png',
   'icons/icon-512.png'
