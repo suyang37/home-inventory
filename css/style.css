@@ -87,6 +87,13 @@ body {
   min-height: var(--header-height);
 }
 
+.page-header .header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
 .page-header h1 {
   font-size: 18px;
   font-weight: 600;
@@ -316,6 +323,8 @@ body {
   padding: 12px 0;
   border-bottom: 1px solid #f0f0f0;
   cursor: pointer;
+  position: relative;
+  overflow: hidden;
 }
 
 .product-item:last-child {
@@ -324,6 +333,55 @@ body {
 
 .product-item:active {
   background: #fafafa;
+}
+
+/* 左滑删除容器 */
+.product-item-wrapper {
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.product-item-wrapper:last-child {
+  border-bottom: none;
+}
+
+.product-item-inner {
+  display: flex;
+  align-items: center;
+  padding: 12px 0;
+  cursor: pointer;
+  background: var(--bg-card);
+  transition: transform 0.25s ease;
+  position: relative;
+  z-index: 2;
+}
+
+.product-item-inner.swiped {
+  transform: translateX(-72px);
+}
+
+.product-item-swipe-delete {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 72px;
+  background: var(--danger);
+  color: #fff;
+  border: none;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+  border-radius: 0;
+  transition: background 0.2s;
+}
+
+.product-item-swipe-delete:active {
+  background: #d32f2f;
 }
 
 .product-icon {

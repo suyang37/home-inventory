@@ -8,9 +8,11 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>家庭物品管理</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="css/style.css?v=6">
+  <link rel="stylesheet" href="css/style.css?v=7">
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="dns-prefetch" href="https://unpkg.com">
 </head>
 <body>
   <div id="app">
@@ -68,7 +70,10 @@
     <div id="page-manage" class="page">
       <div class="page-header">
         <div class="header-title">管理</div>
-        <button class="header-btn" onclick="Router.navigate('product-add')" title="添加物品">＋</button>
+        <div class="header-actions">
+          <button class="header-btn" onclick="toggleBatchMode()" title="批量管理">☑️</button>
+          <button class="header-btn" onclick="Router.navigate('product-add')" title="添加物品">＋</button>
+        </div>
       </div>
       <div class="page-content">
         <!-- 子标签切换 -->
@@ -121,10 +126,15 @@
             <img id="addImagePreviewImg" src="" alt="预览" />
             <button type="button" class="image-preview-remove" onclick="removeAddImage()">×</button>
           </div>
-          <div class="camera-btn" onclick="takePhoto()">
-            📷 拍照识别
+          <div style="display:flex;gap:8px;margin-bottom:4px">
+            <div class="camera-btn" onclick="takePhoto()" style="flex:1">
+              📷 拍照识别
+            </div>
+            <div class="camera-btn" onclick="scanBarcode()" style="flex:1">
+              📱 扫码识别
+            </div>
           </div>
-          <div style="font-size:12px;color:var(--text-light);text-align:center;margin-top:-8px;margin-bottom:12px">
+          <div style="font-size:12px;color:var(--text-light);text-align:center;margin-top:-4px;margin-bottom:12px">
             默认使用基础文字识别，如需更高准确度可到「我的」页面配置 AI 识别
           </div>
           <input type="hidden" id="addImageData">
@@ -284,6 +294,14 @@
           </div>
         </div>
 
+        <!-- 扫码配置 -->
+        <div class="mine-section">
+          <div class="mine-section-title">📱 扫码配置</div>
+          <div id="mineBarcodeSection">
+            <!-- 由 JS 动态渲染 -->
+          </div>
+        </div>
+
         <!-- 位置管理 -->
         <div class="mine-section">
           <div class="mine-section-title">📍 位置管理</div>
@@ -323,7 +341,7 @@
         </div>
 
         <!-- 版本信息 -->
-        <div class="mine-version">家庭物品管理 v5.0 · 数据存储在本地</div>
+        <div class="mine-version">家庭物品管理 v5.1 · 数据存储在本地</div>
       </div>
     </div>
 

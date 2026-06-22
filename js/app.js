@@ -1,6 +1,6 @@
 /**
  * 家庭物品管理 - 主应用逻辑
- * 版本: 5.0
+ * 版本: 5.1
  */
 
 // ========================================
@@ -387,22 +387,83 @@ async function renderManageItems() {
         `;
       }
       
+      // 非批量模式：左滑删除
       return `
-        <div class="product-item">
-          <div class="product-icon" onclick="Router.navigate('product-detail-${p._id}')">${cat.icon}</div>
-          <div class="product-info" onclick="Router.navigate('product-detail-${p._id}')">
-            <div class="product-name">${p.name}</div>
-            <div class="product-meta">${p.locationName || '未设置位置'} · ${expiryText}</div>
-          </div>
-          <div class="product-right">
-            <span class="tag ${statusClass}" onclick="Router.navigate('product-detail-${p._id}')">${statusText}</span>
-            <button class="product-delete-btn" onclick="event.stopPropagation();deleteProduct('${p._id}')" title="删除">🗑️</button>
+        <div class="product-item-wrapper">
+          <button class="product-item-swipe-delete" onclick="event.stopPropagation();deleteProduct('${p._id}')">删除</button>
+          <div class="product-item-inner" ontouchstart="swipeStart(event, '${p._id}')" ontouchmove="swipeMove(event, '${p._id}')" ontouchend="swipeEnd(event, '${p._id}')" onclick="Router.navigate('product-detail-${p._id}')">
+            <div class="product-icon">${cat.icon}</div>
+            <div class="product-info">
+              <div class="product-name">${p.name}</div>
+              <div class="product-meta">${p.locationName || '未设置位置'} · ${expiryText}</div>
+            </div>
+            <div class="product-right">
+              <span class="tag ${statusClass}">${statusText}</span>
+            </div>
           </div>
         </div>
       `;
     }).join('');
   }
 }
+
+// ========================================
+// 左滑删除手势
+// ========================================
+const swipeState = {};
+
+function swipeStart(e, id) {
+  const touch = e.touches[0];
+  swipeState[id] = {
+    startX: touch.clientX,
+    currentX: touch.clientX,
+    swiped: false
+  };
+}
+
+function swipeMove(e, id) {
+  if (!swipeState[id]) return;
+  const touch = e.touches[0];
+  swipeState[id].currentX = touch.clientX;
+  const diff = swipeState[id].startX - touch.clientX;
+  
+  const el = e.currentTarget;
+  if (diff > 0) {
+    el.style.transition = 'none';
+    el.style.transform = `translateX(${-Math.min(diff, 72)}px)`;
+  }
+}
+
+function swipeEnd(e, id) {
+  if (!swipeState[id]) return;
+  const diff = swipeState[id].startX - swipeState[id].currentX;
+  const el = e.currentTarget;
+  
+  el.style.transition = 'transform 0.25s ease';
+  if (diff > 40) {
+    // 左滑超过阈值，显示删除按钮
+    el.style.transform = 'translateX(-72px)';
+    el.classList.add('swiped');
+    swipeState[id].swiped = true;
+  } else {
+    // 回弹
+    el.style.transform = 'translateX(0)';
+    el.classList.remove('swiped');
+    swipeState[id].swiped = false;
+  }
+  
+  delete swipeState[id];
+}
+
+// 点击页面其他区域关闭左滑
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.product-item-wrapper')) {
+    document.querySelectorAll('.product-item-inner.swiped').forEach(el => {
+      el.style.transform = 'translateX(0)';
+      el.classList.remove('swiped');
+    });
+  }
+});
 
 // 渲染管理页位置树
 async function renderLocationTreeInManage() {
@@ -627,6 +688,250 @@ async function takePhoto() {
   } catch (err) {
     console.error('拍照失败:', err);
     showToast('无法打开摄像头', 'error');
+  }
+}
+
+// ========================================
+// 扫码识别（国标码）
+// ========================================
+
+// 扫码识别 - 使用 BarcodeDetector API 或动态加载 ZXing 作为 fallback
+async function scanBarcode() {
+  try {
+    // 检查摄像头支持
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showToast('当前设备不支持摄像头', 'error');
+      return;
+    }
+
+    showLoading('正在打开摄像头...');
+    
+    // 获取摄像头视频流
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }
+    });
+    
+    // 创建临时的 video 元素用于扫码
+    const video = document.createElement('video');
+    video.srcObject = stream;
+    video.setAttribute('playsinline', '');
+    video.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:320px;height:240px';
+    document.body.appendChild(video);
+    await video.play();
+    
+    hideLoading();
+    showToast('正在识别条码...');
+    
+    let barcodeValue = null;
+    
+    // 尝试使用 BarcodeDetector API（Chrome 可用）
+    if ('BarcodeDetector' in window) {
+      try {
+        const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code'] });
+        // 最多尝试 30 次（约 3 秒）
+        for (let i = 0; i < 30; i++) {
+          const barcodes = await detector.detect(video);
+          if (barcodes.length > 0) {
+            barcodeValue = barcodes[0].rawValue;
+            break;
+          }
+          await new Promise(r => setTimeout(r, 100));
+        }
+      } catch (e) {
+        console.log('BarcodeDetector 检测失败:', e);
+      }
+    }
+    
+    // 如果 BarcodeDetector 失败，尝试用 canvas 截图 + ZXing 解码
+    if (!barcodeValue) {
+      showLoading('正在尝试解码...');
+      try {
+        // 动态加载 ZXing 库
+        if (typeof ZXing === 'undefined') {
+          await loadZXing();
+        }
+        
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+        const ctx = canvas.getContext('2d');
+        
+        // 尝试多次截图解码
+        for (let i = 0; i < 20; i++) {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const luminance = new Uint8ClampedArray(canvas.width * canvas.height);
+          for (let j = 0; j < imageData.data.length; j += 4) {
+            luminance[j / 4] = Math.round(
+              0.299 * imageData.data[j] + 0.587 * imageData.data[j + 1] + 0.114 * imageData.data[j + 2]
+            );
+          }
+          
+          try {
+            const result = ZXing.decode(luminance, canvas.width, canvas.height);
+            if (result) {
+              barcodeValue = result;
+              break;
+            }
+          } catch (e) {
+            // 解码失败，继续
+          }
+          await new Promise(r => setTimeout(r, 150));
+        }
+      } catch (e) {
+        console.log('ZXing 解码失败:', e);
+      }
+    }
+    
+    // 清理资源
+    stream.getTracks().forEach(t => t.stop());
+    video.remove();
+    hideLoading();
+    
+    if (!barcodeValue) {
+      showToast('未识别到条码，请确保条码清晰可见', 'error');
+      return;
+    }
+    
+    showToast(`识别到条码: ${barcodeValue}`);
+    
+    // 查询国标码商品信息
+    await lookupBarcode(barcodeValue);
+    
+  } catch (e) {
+    console.error('扫码失败:', e);
+    hideLoading();
+    showToast('扫码失败: ' + e.message, 'error');
+  }
+}
+
+// 动态加载 ZXing
+function loadZXing() {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/@nicolo-ribaudo/zxing-wasm@1/dist/zxing-wasm.js';
+    script.onload = resolve;
+    script.onerror = () => {
+      // 尝试备用 CDN
+      const altScript = document.createElement('script');
+      altScript.src = 'https://unpkg.com/@nicolo-ribaudo/zxing-wasm@1/dist/zxing-wasm.js';
+      altScript.onload = resolve;
+      altScript.onerror = reject;
+      document.head.appendChild(altScript);
+    };
+    document.head.appendChild(script);
+  });
+}
+
+// 查询国标码商品信息
+async function lookupBarcode(barcode) {
+  showLoading('正在查询商品信息...');
+  
+  try {
+    // 使用多个免费 API 查询
+    let productInfo = null;
+    const barcodeConfig = getBarcodeConfig();
+    const apiKey = barcodeConfig ? barcodeConfig.apiKey : '';
+    
+    // API 1: 极速数据（如果配置了 API Key）
+    if (apiKey) {
+      try {
+        const response = await fetch(`https://api.jisuapi.com/barcode2/query?barcode=${barcode}&appkey=${apiKey}`);
+        const data = await response.json();
+        if (data.status === '0' && data.result) {
+          productInfo = {
+            name: data.result.name || data.result.productname || '',
+            brand: data.result.brand || '',
+            category: data.result.category || '',
+            spec: data.result.spec || ''
+          };
+        }
+      } catch (e) {
+        console.log('极速数据 API 查询失败:', e);
+      }
+    }
+    
+    // API 2: 备用 - 使用 openfoodfacts（国际通用，对国内商品可能不全）
+    if (!productInfo) {
+      try {
+        const response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`);
+        const data = await response.json();
+        if (data.status === 1 && data.product) {
+          productInfo = {
+            name: data.product.product_name || '',
+            brand: data.product.brands || '',
+            category: data.product.categories || '',
+            spec: data.product.quantity || ''
+          };
+        }
+      } catch (e) {
+        console.log('OpenFoodFacts 查询失败:', e);
+      }
+    }
+    
+    // API 3: 备用 - 使用 barcode.monster（免费开放接口）
+    if (!productInfo) {
+      try {
+        const response = await fetch(`https://barcode.monster/api/${barcode}`);
+        const data = await response.json();
+        if (data && data.product) {
+          productInfo = {
+            name: data.product.name || data.product.title || '',
+            brand: data.product.brand || '',
+            category: data.product.category || '',
+            spec: data.product.size || ''
+          };
+        }
+      } catch (e) {
+        console.log('Barcode Monster 查询失败:', e);
+      }
+    }
+    
+    hideLoading();
+    
+    if (productInfo && productInfo.name) {
+      // 自动填充表单
+      document.getElementById('addName').value = productInfo.name;
+      
+      // 尝试匹配分类
+      if (productInfo.category) {
+        const catName = productInfo.category.toLowerCase();
+        // 尝试根据分类名称匹配已有分类
+        let matchedCat = null;
+        for (const cat of CATEGORIES) {
+          if (catName.includes(cat.name) || catName.includes(cat.id)) {
+            matchedCat = cat;
+            break;
+          }
+        }
+        // 根据关键词匹配
+        if (!matchedCat) {
+          const foodKeywords = ['食品', '饮料', '调味', '零食', '牛奶', '酸奶', '面包', '蛋糕', '饼干', '方便面', '火腿', '罐头', '酒', '茶', '水'];
+          const isFood = foodKeywords.some(k => catName.includes(k) || (productInfo.name && productInfo.name.includes(k)));
+          if (isFood) {
+            // 进一步判断短保食品
+            const shortShelfKeywords = ['面包', '蛋糕', '酸奶', '鲜奶', '豆腐', '鲜肉', '熟食', '沙拉', '三明治', '寿司'];
+            matchedCat = shortShelfKeywords.some(k => catName.includes(k) || (productInfo.name && productInfo.name.includes(k)))
+              ? CATEGORIES.find(c => c.id === 'short_shelf')
+              : CATEGORIES.find(c => c.id === 'food');
+          } else {
+            matchedCat = CATEGORIES.find(c => c.id === 'other');
+          }
+        }
+        if (matchedCat) {
+          const catEl = document.querySelector(`#addCategoryGrid .category-item[data-id="${matchedCat.id}"]`);
+          if (catEl) selectCategory(catEl, 'addCategoryGrid');
+        }
+      }
+      
+      showToast(`已填入: ${productInfo.name}`);
+    } else {
+      showToast('未查询到该条码的商品信息，请手动填写', 'error');
+    }
+  } catch (e) {
+    hideLoading();
+    console.error('查询商品信息失败:', e);
+    showToast('查询商品信息失败', 'error');
   }
 }
 
@@ -889,7 +1194,14 @@ async function deleteProduct(id) {
   hideLoading();
   
   showToast('删除成功');
-  Router.navigate('manage');
+  
+  // 判断当前是否在管理页，直接刷新列表
+  const currentPage = Router.currentPage || '';
+  if (currentPage === 'manage' || currentPage.startsWith('manage')) {
+    renderManageItems();
+  } else {
+    Router.navigate('manage');
+  }
 }
 
 // ========================================
@@ -1183,35 +1495,26 @@ async function renderLocationSelect(selectId, selectedId) {
   const select = document.getElementById(selectId);
   const locations = (await db.collection(DB.LOCATIONS).get()).data;
   
-  if (locations.length === 0) {
-    // 没有位置时显示提示和快速添加入口
-    select.innerHTML = '<option value="">暂无位置，请先添加</option>';
-    
-    // 在位置选择下方添加快速添加按钮
-    const formGroup = select.closest('.form-group');
-    let quickAddBtn = formGroup.querySelector('.quick-add-location');
-    if (!quickAddBtn) {
-      quickAddBtn = document.createElement('div');
-      quickAddBtn.className = 'quick-add-location';
-      quickAddBtn.style.cssText = 'margin-top:8px';
-      quickAddBtn.innerHTML = `
-        <button type="button" class="btn btn-sm btn-secondary" onclick="quickAddLocation('${selectId}')" style="width:100%">
-          ➕ 快速添加位置
-        </button>
-      `;
-      formGroup.appendChild(quickAddBtn);
-    }
-    return;
-  }
-  
-  // 移除快速添加按钮（如果有）
-  const formGroup = select.closest('.form-group');
-  const existingBtn = formGroup.querySelector('.quick-add-location');
-  if (existingBtn) existingBtn.remove();
-  
   let html = '<option value="">未选择位置</option>';
-  html += buildLocationOptions(locations, null, 0, selectedId);
+  if (locations.length > 0) {
+    html += buildLocationOptions(locations, null, 0, selectedId);
+  }
   select.innerHTML = html;
+  
+  // 在位置选择下方添加快速添加按钮（始终显示）
+  const formGroup = select.closest('.form-group');
+  let quickAddBtn = formGroup.querySelector('.quick-add-location');
+  if (!quickAddBtn) {
+    quickAddBtn = document.createElement('div');
+    quickAddBtn.className = 'quick-add-location';
+    quickAddBtn.style.cssText = 'margin-top:8px';
+    quickAddBtn.innerHTML = `
+      <button type="button" class="btn btn-sm btn-secondary" onclick="quickAddLocation('${selectId}')" style="width:100%">
+        ➕ 快速添加位置
+      </button>
+    `;
+    formGroup.appendChild(quickAddBtn);
+  }
 }
 
 // 快速添加位置（从添加商品页面）
@@ -1332,6 +1635,9 @@ PageHandlers.mine = async function() {
 
   // 渲染 AI 识别配置状态
   renderAIStatus();
+
+  // 渲染扫码配置状态
+  renderBarcodeStatus();
 };
 
 // ========================================
@@ -1792,6 +2098,128 @@ function disconnectAI() {
 }
 
 // ========================================
+// 扫码配置 UI
+// ========================================
+
+const BARCODE_STORAGE_KEY = 'barcode_config';
+
+// 获取扫码配置
+function getBarcodeConfig() {
+  try {
+    const raw = localStorage.getItem(BARCODE_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+// 保存扫码配置
+function saveBarcodeConfig(config) {
+  localStorage.setItem(BARCODE_STORAGE_KEY, JSON.stringify(config));
+}
+
+// 渲染扫码配置状态
+function renderBarcodeStatus() {
+  const container = document.getElementById('mineBarcodeSection');
+  const config = getBarcodeConfig();
+
+  if (!config || !config.apiKey) {
+    container.innerHTML = `
+      <div class="sync-status-card">
+        <div class="sync-status-row">
+          <span class="sync-label">状态</span>
+          <span class="sync-value"><span class="sync-status-dot disconnected"></span>未配置</span>
+        </div>
+        <div class="sync-status-row">
+          <span class="sync-label">说明</span>
+          <span class="sync-value" style="font-size:12px;color:var(--text-light)">扫码识别默认使用开放接口查询，配置 API Key 可提高查询成功率</span>
+        </div>
+        <div class="sync-actions">
+          <button class="btn btn-primary" onclick="showBarcodeConfig()" style="flex:1">📱 配置扫码</button>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="sync-status-card">
+      <div class="sync-status-row">
+        <span class="sync-label">状态</span>
+        <span class="sync-value"><span class="sync-status-dot connected"></span>已配置</span>
+      </div>
+      <div class="sync-status-row">
+        <span class="sync-label">API Key</span>
+        <span class="sync-value">${config.apiKey.substring(0, 4)}****</span>
+      </div>
+      <div class="sync-actions">
+        <button class="btn btn-primary" onclick="showBarcodeConfig()" style="flex:1">⚙️ 修改配置</button>
+      </div>
+      <div style="margin-top:8px;text-align:center">
+        <button class="btn btn-sm" onclick="clearBarcodeConfig()" style="color:var(--danger);background:none;border:none;font-size:12px;cursor:pointer">清除配置</button>
+      </div>
+    </div>
+  `;
+}
+
+// 显示扫码配置弹窗
+function showBarcodeConfig() {
+  const existing = document.querySelector('.sync-modal-overlay');
+  if (existing) existing.remove();
+
+  const config = getBarcodeConfig();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'sync-modal-overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+  overlay.innerHTML = `
+    <div class="sync-modal">
+      <div class="sync-modal-title">📱 扫码配置</div>
+      <div class="sync-modal-desc" style="font-size:12px;color:var(--text-light);margin-bottom:12px">
+        配置极速数据（jisuapi）的 API Key 可提高条码查询成功率。不配置也可使用开放接口查询。
+      </div>
+      
+      <div class="sync-config-form">
+        <div class="form-group">
+          <label class="form-label">API Key（可选）</label>
+          <input type="text" class="form-input" id="barcodeApiKey" placeholder="请输入极速数据 API Key" value="${config ? config.apiKey || '' : ''}" />
+          <div class="form-hint">
+            前往 <a href="https://www.jisuapi.com/" target="_blank" rel="noopener" style="color:var(--primary)">极速数据</a> 注册获取免费 API Key
+          </div>
+        </div>
+      </div>
+
+      <div class="sync-modal-actions">
+        <button class="btn btn-secondary" onclick="this.closest('.sync-modal-overlay').remove()">取消</button>
+        <button class="btn btn-primary" onclick="saveBarcodeConfigBtn()">💾 保存</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+}
+
+// 保存扫码配置（按钮回调）
+function saveBarcodeConfigBtn() {
+  const apiKey = document.getElementById('barcodeApiKey').value.trim();
+  saveBarcodeConfig({ apiKey });
+  showToast('配置已保存');
+  document.querySelector('.sync-modal-overlay')?.remove();
+  renderBarcodeStatus();
+}
+
+// 清除扫码配置
+function clearBarcodeConfig() {
+  showConfirm('清除配置', '确定要清除扫码配置吗？').then(confirmed => {
+    if (!confirmed) return;
+    localStorage.removeItem(BARCODE_STORAGE_KEY);
+    showToast('配置已清除');
+    renderBarcodeStatus();
+  });
+}
+
+// ========================================
 // 家庭管理 UI
 // ========================================
 
@@ -1936,7 +2364,9 @@ async function clearAllData() {
   
   hideLoading();
   showToast('已清除所有数据');
-  Router.navigate('index');
+  // 强制刷新首页
+  window.location.hash = 'index';
+  Router.navigate('index', false);
 }
 
 // 导出数据
