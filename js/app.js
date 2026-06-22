@@ -21,13 +21,14 @@ const Router = {
   },
 
   navigate(page, pushState = true) {
-    // 提取基础页面名（去掉参数部分）
-    const basePage = page.split('-')[0];
+    // 提取基础页面名（去掉 ? 参数部分）
+    let cleanPage = page.split('?')[0];
     
     // 如果页面不存在，跳转到首页
-    const pageEl = document.getElementById(`page-${page}`);
-    if (!pageEl && !page.includes('-')) {
+    const pageEl = document.getElementById(`page-${cleanPage}`);
+    if (!pageEl && !cleanPage.includes('-')) {
       page = 'index';
+      cleanPage = 'index';
     }
 
     if (pushState) {
@@ -39,12 +40,12 @@ const Router = {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
 
     // 显示目标页面
-    const targetEl = document.getElementById(`page-${page}`);
+    const targetEl = document.getElementById(`page-${cleanPage}`);
     if (targetEl) {
       targetEl.classList.add('active');
     } else {
       // 处理带参数的页面（如 product-detail-xxx）
-      const paramPage = page.split('-').slice(0, -1).join('-');
+      const paramPage = cleanPage.split('-').slice(0, -1).join('-');
       const paramEl = document.getElementById(`page-${paramPage}`);
       if (paramEl) {
         paramEl.classList.add('active');
@@ -57,23 +58,35 @@ const Router = {
     this.currentPage = page;
     this.updateTab(page);
 
-    // 调用页面处理函数
+    // 调用页面处理函数 - 优先匹配带参数的处理函数
     const handler = PageHandlers[page];
     if (handler) {
       handler();
     } else {
-      // 尝试匹配带参数的页面处理器
-      const baseHandler = PageHandlers[page.split('-').slice(0, -1).join('-')];
-      if (baseHandler) baseHandler();
+      // 尝试匹配基础页面处理器（去掉 ? 参数）
+      const baseHandler = PageHandlers[cleanPage];
+      if (baseHandler) {
+        baseHandler();
+      } else {
+        // 尝试匹配带 - 参数的页面处理器（如 product-detail-xxx）
+        const paramHandler = PageHandlers[cleanPage.split('-').slice(0, -1).join('-')];
+        if (paramHandler) paramHandler();
+      }
     }
   },
 
   updateTab(basePage) {
+    // 去掉 URL 参数部分
+    const cleanPage = basePage.split('?')[0];
     // 更新标签高亮
-    const validTabs = ['index', 'products', 'locations', 'mine'];
+    const validTabs = ['index', 'manage', 'mine'];
     document.querySelectorAll('.tab-item').forEach(tab => {
       const tabPage = tab.dataset.page;
-      if (tabPage === basePage || (basePage === 'product-add' && tabPage === 'index')) {
+      if (tabPage === cleanPage ||
+          (cleanPage === 'product-add' && tabPage === 'index') ||
+          (cleanPage === 'manage' && tabPage === 'manage') ||
+          (cleanPage.startsWith('product-') && tabPage === 'manage') ||
+          (cleanPage.startsWith('location-') && tabPage === 'manage')) {
         tab.classList.add('active');
       } else {
         tab.classList.remove('active');
@@ -263,13 +276,72 @@ function highlightKeyword(text, keyword) {
 }
 
 // ========================================
-// 物品列表
+// 管理页（整合物品 + 位置）
 // ========================================
 let batchMode = false;
 let selectedIds = new Set();
+let currentItemFilter = 'all'; // 'all', 'food', 'nonfood'
+let currentStatusFilter = 'all'; // 'all', 'normal', 'expiring', 'expired'
 
-PageHandlers.products = async function() {
-  const products = (await db.collection(DB.PRODUCTS).get()).data;
+// 食品分类列表
+const FOOD_CATEGORIES = ['food', 'beverage', 'condiment'];
+
+PageHandlers.manage = async function() {
+  // 解析 URL 参数
+  const page = Router.currentPage;
+  const filterMatch = page.match(/manage\?filter=(\w+)/);
+  if (filterMatch) {
+    currentStatusFilter = filterMatch[1];
+  } else {
+    currentStatusFilter = 'all';
+  }
+  
+  // 默认显示物品子页
+  switchManageTab('items');
+  renderManageItems();
+};
+
+// 切换管理子标签
+function switchManageTab(tab) {
+  document.querySelectorAll('.sub-tab-item').forEach(t => {
+    t.classList.toggle('active', t.dataset.subtab === tab);
+  });
+  document.getElementById('manageItems').style.display = tab === 'items' ? 'block' : 'none';
+  document.getElementById('manageLocations').style.display = tab === 'locations' ? 'block' : 'none';
+  
+  if (tab === 'locations') {
+    renderLocationTreeInManage();
+  }
+}
+
+// 切换物品筛选
+function switchItemFilter(filter) {
+  currentItemFilter = filter;
+  document.querySelectorAll('.filter-tab-item').forEach(t => {
+    t.classList.toggle('active', t.dataset.filter === filter);
+  });
+  renderManageItems();
+}
+
+// 渲染管理页物品列表
+async function renderManageItems() {
+  let products = (await db.collection(DB.PRODUCTS).get()).data;
+  
+  // 应用状态筛选（来自首页统计点击）
+  if (currentStatusFilter !== 'all') {
+    products = products.filter(p => {
+      if (p.noExpiry) return false;
+      const info = getExpiryInfo(p.expiryDate);
+      return info.status === currentStatusFilter;
+    });
+  }
+  
+  // 应用食品/非食品筛选
+  if (currentItemFilter === 'food') {
+    products = products.filter(p => FOOD_CATEGORIES.includes(p.category));
+  } else if (currentItemFilter === 'nonfood') {
+    products = products.filter(p => !FOOD_CATEGORIES.includes(p.category));
+  }
   
   // 按过期日期排序
   products.sort((a, b) => {
@@ -282,9 +354,12 @@ PageHandlers.products = async function() {
     return new Date(a.expiryDate) - new Date(b.expiryDate);
   });
 
-  const container = document.getElementById('productItems');
+  const container = document.getElementById('manageProductItems');
   if (products.length === 0) {
-    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📦</div><div class="empty-text">还没有物品，点击右上角 ＋ 添加</div></div>';
+    const msg = currentStatusFilter !== 'all'
+      ? '没有符合条件的物品'
+      : '还没有物品，点击右上角 ＋ 添加';
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">📦</div><div class="empty-text">${msg}</div></div>`;
   } else {
     container.innerHTML = products.map(p => {
       const info = getExpiryInfo(p.expiryDate);
@@ -326,32 +401,46 @@ PageHandlers.products = async function() {
       `;
     }).join('');
   }
-};
+}
+
+// 渲染管理页位置树
+async function renderLocationTreeInManage() {
+  const locations = (await db.collection(DB.LOCATIONS).get()).data;
+  const products = (await db.collection(DB.PRODUCTS).get()).data;
+  
+  const container = document.getElementById('manageLocationTree');
+  
+  if (locations.length === 0) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📍</div><div class="empty-text">还没有位置，请到"我的"页面添加</div></div>';
+    return;
+  }
+
+  const rootLocations = locations.filter(l => !l.parentId);
+  container.innerHTML = rootLocations.map(loc => renderTreeNode(loc, locations, products)).join('');
+}
 
 // 批量管理
 function toggleBatchMode() {
   batchMode = !batchMode;
   selectedIds.clear();
   document.getElementById('batchActionBar').style.display = batchMode ? 'flex' : 'none';
-  document.getElementById('batchManageBtn').textContent = batchMode ? '✅' : '📋';
   updateBatchCount();
-  PageHandlers.products();
+  renderManageItems();
 }
 
 function toggleSelectAll() {
   const allChecked = document.getElementById('selectAllCheckbox').checked;
   if (allChecked) {
-    // 全选 - 获取所有物品ID
     db.collection(DB.PRODUCTS).get().then(result => {
       result.data.forEach(p => selectedIds.add(p._id));
       document.getElementById('selectAllCheckbox').checked = true;
       updateBatchCount();
-      PageHandlers.products();
+      renderManageItems();
     });
   } else {
     selectedIds.clear();
     updateBatchCount();
-    PageHandlers.products();
+    renderManageItems();
   }
 }
 
@@ -362,13 +451,15 @@ function toggleSelectItem(id) {
     selectedIds.add(id);
   }
   updateBatchCount();
-  PageHandlers.products();
+  renderManageItems();
 }
 
 function updateBatchCount() {
   const count = selectedIds.size;
-  document.getElementById('batchCount').textContent = `已选 ${count} 项`;
-  document.getElementById('batchDeleteBtn').disabled = count === 0;
+  const countEl = document.getElementById('batchCount');
+  const deleteBtn = document.getElementById('batchDeleteBtn');
+  if (countEl) countEl.textContent = `已选 ${count} 项`;
+  if (deleteBtn) deleteBtn.disabled = count === 0;
 }
 
 async function batchDelete() {
@@ -379,14 +470,21 @@ async function batchDelete() {
   if (!confirmed) return;
   
   showLoading('正在删除...');
-  for (const id of selectedIds) {
-    await db.collection(DB.PRODUCTS).doc(id).remove();
+  const ids = Array.from(selectedIds);
+  for (const id of ids) {
+    try {
+      await db.collection(DB.PRODUCTS).doc(id).remove();
+    } catch (e) {
+      console.error('删除失败:', id, e);
+    }
   }
   hideLoading();
   
   selectedIds.clear();
   showToast(`已删除 ${count} 个物品`);
-  toggleBatchMode();
+  batchMode = false;
+  document.getElementById('batchActionBar').style.display = 'none';
+  renderManageItems();
 }
 
 // ========================================

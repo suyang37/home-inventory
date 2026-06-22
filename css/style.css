@@ -1594,6 +1594,101 @@ body {
 }
 
 /* ========================================
+   管理页子标签栏
+   ======================================== */
+.sub-tab-bar {
+  display: flex;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.sub-tab-item {
+  flex: 1;
+  padding: 10px 8px;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  position: relative;
+  transition: color 0.2s;
+  user-select: none;
+}
+
+.sub-tab-item.active {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.sub-tab-item.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 20%;
+  right: 20%;
+  height: 3px;
+  background: var(--primary);
+  border-radius: 3px 3px 0 0;
+}
+
+.sub-tab-item:not(.active):hover {
+  color: var(--text-primary);
+  background: rgba(0,0,0,0.02);
+}
+
+/* ========================================
+   管理页筛选标签栏
+   ======================================== */
+.filter-tab-bar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--bg-page);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 44px; /* 子标签栏高度 */
+  z-index: 9;
+}
+
+.filter-tab-item {
+  padding: 5px 14px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--bg-card);
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.filter-tab-item.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+.filter-tab-item:not(.active):hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* ========================================
+   管理子页面容器
+   ======================================== */
+.manage-sub-page {
+  display: block;
+}
+
+.manage-sub-page[style*="display:none"] {
+  display: none;
+}
+
+/* ========================================
    响应式
    ======================================== */
 @media (min-width: 480px) {

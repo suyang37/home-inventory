@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>家庭物品管理</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="css/style.css?v=5">
+  <link rel="stylesheet" href="css/style.css?v=6">
 </head>
 <body>
   <div id="app">
@@ -35,21 +35,21 @@
         </div>
         <!-- 搜索结果 -->
         <div id="homeSearchResults"></div>
-        <!-- 统计卡片 -->
+        <!-- 统计卡片（可点击跳转） -->
         <div class="stats-grid" id="homeStats">
-          <div class="stat-item stat-total">
+          <div class="stat-item stat-total" onclick="Router.navigate('manage')">
             <div class="stat-number" id="statTotal">0</div>
             <div class="stat-label">全部物品</div>
           </div>
-          <div class="stat-item stat-normal">
+          <div class="stat-item stat-normal" onclick="Router.navigate('manage?filter=normal')">
             <div class="stat-number" id="statNormal">0</div>
             <div class="stat-label">正常</div>
           </div>
-          <div class="stat-item stat-expiring">
+          <div class="stat-item stat-expiring" onclick="Router.navigate('manage?filter=expiring')">
             <div class="stat-number" id="statExpiring">0</div>
             <div class="stat-label">即将过期</div>
           </div>
-          <div class="stat-item stat-expired">
+          <div class="stat-item stat-expired" onclick="Router.navigate('manage?filter=expired')">
             <div class="stat-number" id="statExpired">0</div>
             <div class="stat-label">已过期</div>
           </div>
@@ -62,25 +62,47 @@
       </div>
     </div>
 
-    <!-- ========== 物品列表 ========== -->
-    <div id="page-products" class="page">
+    <!-- ========== 管理（整合物品+位置） ========== -->
+    <div id="page-manage" class="page">
       <div class="page-header">
-        <div class="header-title">物品列表</div>
-        <button class="header-btn" id="batchManageBtn" onclick="toggleBatchMode()" title="批量管理">📋</button>
+        <div class="header-title">管理</div>
+        <button class="header-btn" onclick="Router.navigate('product-add')" title="添加物品">＋</button>
       </div>
       <div class="page-content">
-        <!-- 批量操作栏 -->
-        <div id="batchActionBar" class="batch-action-bar" style="display:none">
-          <label class="batch-select-all" onclick="toggleSelectAll()">
-            <input type="checkbox" id="selectAllCheckbox" />
-            <span>全选</span>
-          </label>
-          <span id="batchCount" class="batch-count">已选 0 项</span>
-          <button class="batch-delete-btn" id="batchDeleteBtn" onclick="batchDelete()" disabled>🗑️ 删除选中</button>
-          <button class="batch-cancel-btn" onclick="toggleBatchMode()">取消</button>
+        <!-- 子标签切换 -->
+        <div class="sub-tab-bar" id="manageSubTabs">
+          <button class="sub-tab-item active" data-subtab="items" onclick="switchManageTab('items')">📦 物品</button>
+          <button class="sub-tab-item" data-subtab="locations" onclick="switchManageTab('locations')">📍 位置</button>
         </div>
-        <div class="card" id="productList">
-          <div id="productItems"></div>
+        
+        <!-- 物品子页面 -->
+        <div id="manageItems" class="manage-sub-page">
+          <!-- 筛选标签 -->
+          <div class="filter-tab-bar" id="itemFilterTabs">
+            <button class="filter-tab-item active" data-filter="all" onclick="switchItemFilter('all')">全部</button>
+            <button class="filter-tab-item" data-filter="food" onclick="switchItemFilter('food')">🍚 食品</button>
+            <button class="filter-tab-item" data-filter="nonfood" onclick="switchItemFilter('nonfood')">📦 非食品</button>
+          </div>
+          <!-- 批量操作栏 -->
+          <div id="batchActionBar" class="batch-action-bar" style="display:none">
+            <label class="batch-select-all" onclick="toggleSelectAll()">
+              <input type="checkbox" id="selectAllCheckbox" />
+              <span>全选</span>
+            </label>
+            <span id="batchCount" class="batch-count">已选 0 项</span>
+            <button class="batch-delete-btn" id="batchDeleteBtn" onclick="batchDelete()" disabled>🗑️ 删除选中</button>
+            <button class="batch-cancel-btn" onclick="toggleBatchMode()">取消</button>
+          </div>
+          <div class="card">
+            <div id="manageProductItems"></div>
+          </div>
+        </div>
+        
+        <!-- 位置子页面 -->
+        <div id="manageLocations" class="manage-sub-page" style="display:none">
+          <div class="card">
+            <div id="manageLocationTree"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -331,13 +353,9 @@
         <span class="tab-icon">🏠</span>
         <span class="tab-label">首页</span>
       </button>
-      <button class="tab-item" data-page="products" onclick="Router.navigate('products')">
-        <span class="tab-icon">📦</span>
-        <span class="tab-label">物品</span>
-      </button>
-      <button class="tab-item" data-page="locations" onclick="Router.navigate('locations')">
-        <span class="tab-icon">📍</span>
-        <span class="tab-label">位置</span>
+      <button class="tab-item" data-page="manage" onclick="Router.navigate('manage')">
+        <span class="tab-icon">📋</span>
+        <span class="tab-label">管理</span>
       </button>
       <button class="tab-item" data-page="mine" onclick="Router.navigate('mine')">
         <span class="tab-icon">👤</span>
