@@ -1,14 +1,14 @@
 /**
- * 家庭物品管理 - PWA 主应用
- * SPA 路由 + 所有页面逻辑
+ * 家庭物品管理 - 主应用逻辑
+ * 版本: 4.0
  */
 
 // ========================================
-// SPA 路由
+// 路由
 // ========================================
 const Router = {
   currentPage: 'index',
-  stack: [],
+  history: [],
 
   init() {
     window.addEventListener('hashchange', () => this.handleRoute());
@@ -21,6 +21,15 @@ const Router = {
   },
 
   navigate(page, pushState = true) {
+    // 提取基础页面名（去掉参数部分）
+    const basePage = page.split('-')[0];
+    
+    // 如果页面不存在，跳转到首页
+    const pageEl = document.getElementById(`page-${page}`);
+    if (!pageEl && !page.includes('-')) {
+      page = 'index';
+    }
+
     if (pushState) {
       window.location.hash = page;
       return;
@@ -28,36 +37,43 @@ const Router = {
 
     // 隐藏所有页面
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    
-    // 解析页面ID（支持动态ID如 product-detail-xxx）
-    const basePage = page.split('-').slice(0, 2).join('-');
-    const isDynamic = page !== basePage;
-    
-    // 查找页面元素 - 先精确匹配，再尝试基础页面
-    let target = document.getElementById(`page-${page}`);
-    if (!target && isDynamic) {
-      target = document.getElementById(`page-${basePage}`);
-    }
-    
-    if (target) {
-      target.classList.add('active');
-      this.currentPage = page;
-      
-      // 调用页面初始化函数
-      const handlerName = isDynamic ? basePage : page;
-      const initFn = PageHandlers[handlerName];
-      if (initFn) initFn();
+
+    // 显示目标页面
+    const targetEl = document.getElementById(`page-${page}`);
+    if (targetEl) {
+      targetEl.classList.add('active');
+    } else {
+      // 处理带参数的页面（如 product-detail-xxx）
+      const paramPage = page.split('-').slice(0, -1).join('-');
+      const paramEl = document.getElementById(`page-${paramPage}`);
+      if (paramEl) {
+        paramEl.classList.add('active');
+      } else {
+        document.getElementById('page-index').classList.add('active');
+        page = 'index';
+      }
     }
 
-    // 更新 Tab 高亮
-    this.updateTab(basePage);
+    this.currentPage = page;
+    this.updateTab(page);
+
+    // 调用页面处理函数
+    const handler = PageHandlers[page];
+    if (handler) {
+      handler();
+    } else {
+      // 尝试匹配带参数的页面处理器
+      const baseHandler = PageHandlers[page.split('-').slice(0, -1).join('-')];
+      if (baseHandler) baseHandler();
+    }
   },
 
   updateTab(basePage) {
-    const tabPages = ['index', 'products', 'product-add', 'locations', 'search', 'mine'];
+    // 更新标签高亮
+    const validTabs = ['index', 'products', 'locations', 'mine'];
     document.querySelectorAll('.tab-item').forEach(tab => {
       const tabPage = tab.dataset.page;
-      if (tabPage === basePage || tabPage === basePage.replace('product-', '')) {
+      if (tabPage === basePage || (basePage === 'product-add' && tabPage === 'index')) {
         tab.classList.add('active');
       } else {
         tab.classList.remove('active');
@@ -65,8 +81,14 @@ const Router = {
     });
   },
 
-  goBack() {
-    window.history.back();
+  back() {
+    if (this.history.length > 0) {
+      this.history.pop();
+      const prev = this.history.pop() || 'index';
+      this.navigate(prev, true);
+    } else {
+      this.navigate('index', true);
+    }
   }
 };
 
@@ -76,46 +98,192 @@ const Router = {
 const PageHandlers = {};
 
 // ========================================
-// 首页 - 过期概览仪表盘
+// 首页
 // ========================================
 PageHandlers.index = async function() {
   const products = (await db.collection(DB.PRODUCTS).get()).data;
   
-  // 排除已丢弃的物品
-  const activeProducts = products.filter(p => p.status !== 'disposed');
-  const total = activeProducts.length;
-  const normal = activeProducts.filter(p => {
-    const info = getExpiryInfo(p.expiryDate);
-    return info.status === 'normal';
-  }).length;
-  const expiring = activeProducts.filter(p => {
-    const info = getExpiryInfo(p.expiryDate);
-    return info.status === 'expiring';
-  }).length;
-  const expired = activeProducts.filter(p => {
-    const info = getExpiryInfo(p.expiryDate);
-    return info.status === 'expired';
-  }).length;
-
+  // 更新统计
+  const total = products.length;
+  const normal = products.filter(p => { const i = getExpiryInfo(p.expiryDate); return i.status === 'normal'; }).length;
+  const expiring = products.filter(p => { const i = getExpiryInfo(p.expiryDate); return i.status === 'expiring'; }).length;
+  const expired = products.filter(p => { const i = getExpiryInfo(p.expiryDate); return i.status === 'expired'; }).length;
+  
   document.getElementById('statTotal').textContent = total;
   document.getElementById('statNormal').textContent = normal;
   document.getElementById('statExpiring').textContent = expiring;
   document.getElementById('statExpired').textContent = expired;
 
-  // 即将过期列表
-  const expiringList = document.getElementById('expiringList');
-  const soonExpire = products
-    .filter(p => {
-      const info = getExpiryInfo(p.expiryDate);
-      return info.status === 'expiring' && p.status !== 'disposed';
-    })
-    .sort((a, b) => new Date(a.expiryDate) - new Date(b.expiryDate))
-    .slice(0, 10);
+  // 即将过期/已过期列表
+  const expiringProducts = products
+    .filter(p => { const i = getExpiryInfo(p.expiryDate); return i.status === 'expiring' || i.status === 'expired'; })
+    .sort((a, b) => new Date(a.expiryDate) - new Date(b.expiryDate));
 
-  if (soonExpire.length === 0) {
-    expiringList.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><div class="empty-text">没有即将过期的物品</div></div>';
+  const container = document.getElementById('expiringItems');
+  if (expiringProducts.length === 0) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><div class="empty-text">所有物品都在有效期内</div></div>';
   } else {
-    expiringList.innerHTML = soonExpire.map(p => {
+    container.innerHTML = expiringProducts.map(p => {
+      const info = getExpiryInfo(p.expiryDate);
+      const cat = CATEGORIES.find(c => c.id === p.category) || CATEGORIES[CATEGORIES.length - 1];
+      return `
+        <div class="product-item" onclick="Router.navigate('product-detail-${p._id}')">
+          <div class="product-icon">${cat.icon}</div>
+          <div class="product-info">
+            <div class="product-name">${p.name}</div>
+            <div class="product-meta">${p.locationName || '未设置位置'} · ${formatDate(p.expiryDate)}</div>
+          </div>
+          <div class="product-right">
+            <span class="tag ${EXPIRY_STATUS_CLASS[info.status]}">${info.text}</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // 重置搜索状态
+  document.getElementById('homeSearchInput').value = '';
+  document.getElementById('homeSearchResults').innerHTML = '';
+  document.getElementById('homeSearchHistory').style.display = 'none';
+  document.getElementById('homeStats').style.display = 'grid';
+  document.getElementById('expiringList').style.display = 'block';
+};
+
+// ========================================
+// 首页搜索
+// ========================================
+const doHomeSearch = debounce(async function() {
+  const keyword = document.getElementById('homeSearchInput').value.trim();
+  const resultsContainer = document.getElementById('homeSearchResults');
+  const historyContainer = document.getElementById('homeSearchHistory');
+  const statsContainer = document.getElementById('homeStats');
+  const expiringContainer = document.getElementById('expiringList');
+
+  if (!keyword) {
+    resultsContainer.innerHTML = '';
+    historyContainer.style.display = 'none';
+    statsContainer.style.display = 'grid';
+    expiringContainer.style.display = 'block';
+    return;
+  }
+
+  // 隐藏统计和过期列表，显示搜索结果
+  statsContainer.style.display = 'none';
+  expiringContainer.style.display = 'none';
+  historyContainer.style.display = 'none';
+
+  showLoading('搜索中...');
+  
+  const products = (await db.collection(DB.PRODUCTS).get()).data;
+  const results = products.filter(p => {
+    return p.name.includes(keyword) || 
+           (p.locationName && p.locationName.includes(keyword)) ||
+           (p.notes && p.notes.includes(keyword));
+  });
+
+  hideLoading();
+
+  // 保存搜索历史
+  saveSearchHistory(keyword);
+
+  if (results.length === 0) {
+    resultsContainer.innerHTML = '<div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">未找到匹配的商品</div></div>';
+  } else {
+    resultsContainer.innerHTML = results.map(p => {
+      const info = getExpiryInfo(p.expiryDate);
+      const cat = CATEGORIES.find(c => c.id === p.category) || CATEGORIES[CATEGORIES.length - 1];
+      return `
+        <div class="product-item" onclick="Router.navigate('product-detail-${p._id}')">
+          <div class="product-icon">${cat.icon}</div>
+          <div class="product-info">
+            <div class="product-name">${highlightKeyword(p.name, keyword)}</div>
+            <div class="product-meta">${p.locationName || '未设置位置'} · ${formatDate(p.expiryDate)}</div>
+          </div>
+          <div class="product-right">
+            <span class="tag ${EXPIRY_STATUS_CLASS[info.status]}">${info.text}</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+}, 300);
+
+function clearHomeSearch() {
+  document.getElementById('homeSearchInput').value = '';
+  document.getElementById('homeSearchResults').innerHTML = '';
+  document.getElementById('homeSearchHistory').style.display = 'none';
+  document.getElementById('homeStats').style.display = 'grid';
+  document.getElementById('expiringList').style.display = 'block';
+}
+
+// 搜索历史（复用，但渲染到首页）
+function saveSearchHistory(keyword) {
+  let history = JSON.parse(localStorage.getItem('search_history') || '[]');
+  history = history.filter(h => h !== keyword);
+  history.unshift(keyword);
+  if (history.length > 10) history = history.slice(0, 10);
+  localStorage.setItem('search_history', JSON.stringify(history));
+  renderHomeSearchHistory();
+}
+
+function renderHomeSearchHistory() {
+  const history = JSON.parse(localStorage.getItem('search_history') || '[]');
+  const container = document.getElementById('homeSearchHistoryTags');
+  
+  if (history.length === 0) {
+    document.getElementById('homeSearchHistory').style.display = 'none';
+    return;
+  }
+
+  document.getElementById('homeSearchHistory').style.display = 'block';
+  container.innerHTML = history.map(h => `
+    <span class="history-tag" onclick="document.getElementById('homeSearchInput').value='${h.replace(/'/g, "\\'")}';doHomeSearch()">
+      ${h}
+      <button class="remove-btn" onclick="event.stopPropagation();removeSearchHistory('${h.replace(/'/g, "\\'")}')">×</button>
+    </span>
+  `).join('');
+}
+
+function removeSearchHistory(keyword) {
+  let history = JSON.parse(localStorage.getItem('search_history') || '[]');
+  history = history.filter(h => h !== keyword);
+  localStorage.setItem('search_history', JSON.stringify(history));
+  renderHomeSearchHistory();
+}
+
+function clearSearchHistory() {
+  localStorage.removeItem('search_history');
+  renderHomeSearchHistory();
+}
+
+function highlightKeyword(text, keyword) {
+  if (!text || !keyword) return text || '';
+  const regex = new RegExp(`(${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  return text.replace(regex, '<strong style="color:var(--primary)">$1</strong>');
+}
+
+// ========================================
+// 商品列表
+// ========================================
+PageHandlers.products = async function() {
+  const products = (await db.collection(DB.PRODUCTS).get()).data;
+  
+  // 按过期日期排序
+  products.sort((a, b) => {
+    const aInfo = getExpiryInfo(a.expiryDate);
+    const bInfo = getExpiryInfo(b.expiryDate);
+    const order = { 'expired': 0, 'expiring': 1, 'normal': 2 };
+    const aOrder = order[aInfo.status] || 3;
+    const bOrder = order[bInfo.status] || 3;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return new Date(a.expiryDate) - new Date(b.expiryDate);
+  });
+
+  const container = document.getElementById('productItems');
+  if (products.length === 0) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📦</div><div class="empty-text">还没有物品，点击右上角 ＋ 添加</div></div>';
+  } else {
+    container.innerHTML = products.map(p => {
       const info = getExpiryInfo(p.expiryDate);
       const cat = CATEGORIES.find(c => c.id === p.category) || CATEGORIES[CATEGORIES.length - 1];
       return `
@@ -135,146 +303,298 @@ PageHandlers.index = async function() {
 };
 
 // ========================================
-// 商品列表
+// OCR 识别 - 使用 Tesseract.js
 // ========================================
-PageHandlers.products = async function() {
-  const list = document.getElementById('productList');
-  const products = (await db.collection(DB.PRODUCTS).orderBy('updatedAt', 'desc').get()).data;
 
-  if (products.length === 0) {
-    list.innerHTML = '<div class="empty-state"><div class="empty-icon">📦</div><div class="empty-text">还没有商品，点击下方 + 添加</div></div>';
+// 中文物品关键词库
+const PRODUCT_KEYWORDS = [
+  // 肉类
+  { keywords: ['鸡肉', '鸡胸肉', '鸡腿', '鸡翅', '鸡爪', '鸡', '猪肉', '牛肉', '羊肉', '排骨', '五花肉', '瘦肉', '肉'], category: 'meat', name: '肉类' },
+  // 海鲜
+  { keywords: ['鱼', '虾', '蟹', '海鲜', '带鱼', '鲈鱼', '三文鱼', '鱿鱼', '蛤蜊', '贝'], category: 'seafood', name: '海鲜' },
+  // 蔬菜
+  { keywords: ['白菜', '青菜', '菠菜', '生菜', '油麦菜', '空心菜', '西兰花', '花菜', '番茄', '西红柿', '黄瓜', '土豆', '萝卜', '胡萝卜', '茄子', '豆角', '辣椒', '葱', '姜', '蒜', '蔬菜', '菜'], category: 'vegetable', name: '蔬菜' },
+  // 水果
+  { keywords: ['苹果', '香蕉', '橙子', '橘子', '葡萄', '草莓', '西瓜', '哈密瓜', '芒果', '菠萝', '猕猴桃', '梨', '桃', '樱桃', '柠檬', '水果'], category: 'fruit', name: '水果' },
+  // 乳制品
+  { keywords: ['牛奶', '酸奶', '奶酪', '芝士', '黄油', '奶油', '乳'], category: 'dairy', name: '乳制品' },
+  // 蛋类
+  { keywords: ['鸡蛋', '鸭蛋', '鹌鹑蛋', '蛋', '皮蛋', '咸蛋'], category: 'egg', name: '蛋类' },
+  // 豆制品
+  { keywords: ['豆腐', '豆干', '豆皮', '腐竹', '豆浆', '豆'], category: 'tofu', name: '豆制品' },
+  // 调味品
+  { keywords: ['酱油', '醋', '盐', '糖', '味精', '鸡精', '料酒', '生抽', '老抽', '蚝油', '豆瓣酱', '辣椒酱', '番茄酱', '调味', '调料', '油', '香油', '橄榄油'], category: 'condiment', name: '调味品' },
+  // 主食
+  { keywords: ['大米', '米', '面粉', '面条', '挂面', '方便面', '面包', '馒头', '包子', '饺子', '馄饨', '米粉', '粉丝', '燕麦', '麦片'], category: 'staple', name: '主食' },
+  // 饮料
+  { keywords: ['可乐', '雪碧', '果汁', '茶', '咖啡', '饮料', '矿泉水', '水', '啤酒', '白酒', '红酒'], category: 'beverage', name: '饮料' },
+  // 零食
+  { keywords: ['薯片', '饼干', '巧克力', '糖果', '坚果', '瓜子', '花生', '辣条', '面包', '蛋糕', '零食'], category: 'snack', name: '零食' },
+  // 冷冻食品
+  { keywords: ['速冻', '冷冻', '冰淇淋', '雪糕', '冰棍', '冻'], category: 'frozen', name: '冷冻食品' },
+  // 罐头
+  { keywords: ['罐头', '午餐肉', '火腿', '香肠', '腊肠', '培根'], category: 'canned', name: '罐头/加工食品' },
+  // 干货
+  { keywords: ['木耳', '香菇', '蘑菇', '紫菜', '海带', '红枣', '枸杞', '桂圆', '干货', '干'], category: 'dry', name: '干货' },
+  // 药品
+  { keywords: ['药', '胶囊', '片', '口服液', '膏', '贴', '维生素', '钙'], category: 'medicine', name: '药品' },
+  // 日用品
+  { keywords: ['纸巾', '纸', '洗衣液', '洗洁精', '洗发水', '沐浴露', '牙膏', '牙刷', '肥皂', '垃圾袋'], category: 'daily', name: '日用品' },
+];
+
+function matchProduct(text) {
+  if (!text) return null;
+  
+  const lowerText = text.toLowerCase();
+  
+  // 按关键词匹配
+  for (const item of PRODUCT_KEYWORDS) {
+    for (const keyword of item.keywords) {
+      if (lowerText.includes(keyword.toLowerCase())) {
+        return item;
+      }
+    }
+  }
+  
+  return null;
+}
+
+async function loadTesseract() {
+  if (window.Tesseract) return true;
+  
+  try {
+    // Tesseract.js v5 已通过 CDN 加载
+    if (typeof Tesseract === 'undefined') {
+      showToast('OCR 引擎加载失败', 'error');
+      return false;
+    }
+    window.Tesseract = Tesseract;
+    return true;
+  } catch (e) {
+    console.error('Tesseract 加载失败:', e);
+    showToast('OCR 引擎加载失败', 'error');
+    return false;
+  }
+}
+
+async function takePhoto() {
+  try {
+    // 检查是否支持摄像头
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showToast('当前设备不支持摄像头', 'error');
+      return;
+    }
+
+    // 创建 video 元素用于拍照
+    const video = document.createElement('video');
+    video.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;background:#000;z-index:1000';
+    
+    const canvas = document.createElement('canvas');
+    const captureBtn = document.createElement('button');
+    captureBtn.textContent = '📸 拍照';
+    captureBtn.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);padding:16px 48px;font-size:18px;border:none;border-radius:50px;background:#fff;color:#333;z-index:1001;box-shadow:0 4px 20px rgba(0,0,0,0.3);cursor:pointer';
+    
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '✕ 取消';
+    closeBtn.style.cssText = 'position:fixed;top:40px;right:20px;padding:8px 16px;font-size:14px;border:none;border-radius:20px;background:rgba(0,0,0,0.5);color:#fff;z-index:1001;cursor:pointer';
+
+    document.body.appendChild(video);
+    document.body.appendChild(captureBtn);
+    document.body.appendChild(closeBtn);
+
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } 
+    });
+    video.srcObject = stream;
+    await video.play();
+
+    return new Promise((resolve) => {
+      const cleanup = () => {
+        stream.getTracks().forEach(t => t.stop());
+        video.remove();
+        captureBtn.remove();
+        closeBtn.remove();
+      };
+
+      captureBtn.onclick = async () => {
+        // 拍照
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0);
+        cleanup();
+
+        // 压缩图片
+        const compressedDataUrl = await compressImage(canvas.toDataURL('image/jpeg', 0.9), 800, 0.7);
+        
+        // 显示预览
+        const preview = document.getElementById('addImagePreview');
+        const previewImg = document.getElementById('addImagePreviewImg');
+        previewImg.src = compressedDataUrl;
+        preview.style.display = 'block';
+        document.getElementById('addImageData').value = compressedDataUrl;
+
+        showLoading('正在识别...');
+
+        try {
+          const loaded = await loadTesseract();
+          if (!loaded) {
+            hideLoading();
+            resolve();
+            return;
+          }
+
+          const result = await window.Tesseract.recognize(
+            compressedDataUrl,
+            'chi_sim+eng',
+            {
+              logger: (m) => {
+                if (m.status === 'recognizing text') {
+                  console.log(`OCR 进度: ${Math.round(m.progress * 100)}%`);
+                }
+              }
+            }
+          );
+
+          hideLoading();
+          
+          const text = result.data.text;
+          console.log('OCR 识别结果:', text);
+
+          if (text) {
+            // 尝试匹配商品
+            const matched = matchProduct(text);
+            if (matched) {
+              document.getElementById('addName').value = matched.name;
+              // 选中匹配的分类
+              const catItems = document.querySelectorAll('#addCategoryGrid .category-item');
+              catItems.forEach(item => {
+                if (item.dataset.id === matched.category) {
+                  item.classList.add('selected');
+                } else {
+                  item.classList.remove('selected');
+                }
+              });
+              showToast(`识别为: ${matched.name}`);
+            } else {
+              // 取第一行文字作为名称
+              const firstLine = text.split('\n').filter(line => line.trim())[0];
+              if (firstLine) {
+                document.getElementById('addName').value = firstLine.trim().substring(0, 50);
+                showToast('已填入识别文字，请确认');
+              }
+            }
+          } else {
+            showToast('未识别到文字', 'error');
+          }
+        } catch (err) {
+          hideLoading();
+          console.error('OCR 识别失败:', err);
+          showToast('识别失败，请手动输入', 'error');
+        }
+
+        resolve();
+      };
+
+      closeBtn.onclick = () => {
+        cleanup();
+        resolve();
+      };
+    });
+  } catch (err) {
+    console.error('拍照失败:', err);
+    showToast('无法打开摄像头', 'error');
+  }
+}
+
+// ========================================
+// 图片压缩
+// ========================================
+function compressImage(dataUrl, maxWidth = 800, quality = 0.7) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = function() {
+      const canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+
+      // 按最大宽度缩放
+      if (width > maxWidth) {
+        height = Math.round(height * maxWidth / width);
+        width = maxWidth;
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // 压缩为 JPEG
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.src = dataUrl;
+  });
+}
+
+function removeAddImage() {
+  document.getElementById('addImagePreview').style.display = 'none';
+  document.getElementById('addImagePreviewImg').src = '';
+  document.getElementById('addImageData').value = '';
+}
+
+// ========================================
+// 提交商品
+// ========================================
+async function submitProduct() {
+  const name = document.getElementById('addName').value.trim();
+  if (!name) {
+    showToast('请输入物品名称', 'error');
     return;
   }
 
-  list.innerHTML = products.map(p => {
-    const info = getExpiryInfo(p.expiryDate);
-    const cat = CATEGORIES.find(c => c.id === p.category) || CATEGORIES[CATEGORIES.length - 1];
-    return `
-      <div class="product-item" onclick="Router.navigate('product-detail-${p._id}')">
-        <div class="product-icon">${cat.icon}</div>
-        <div class="product-info">
-          <div class="product-name">${p.name}</div>
-          <div class="product-meta">${p.locationName || '未设置位置'} · ${formatDate(p.expiryDate)}</div>
-        </div>
-        <div class="product-right">
-          <span class="tag ${EXPIRY_STATUS_CLASS[info.status]}">${info.text}</span>
-        </div>
-      </div>
-    `;
-  }).join('');
-};
-
-// ========================================
-// 商品录入
-// ========================================
-PageHandlers['product-add'] = function() {
-  // 重置表单
-  document.getElementById('addForm').reset();
-  document.getElementById('addImagePreview').style.display = 'none';
-  document.getElementById('addImageData').value = '';
-  document.getElementById('addOcrResult').style.display = 'none';
+  const selectedCat = document.querySelector('#addCategoryGrid .category-item.selected');
+  const category = selectedCat ? selectedCat.dataset.id : 'other';
   
-  // 填充分类选项
-  renderCategoryGrid('addCategoryGrid', null);
-  
-  // 填充位置选项
-  renderLocationSelect('addLocation');
-  
-  // 填充保质期单位
-  const unitSelect = document.getElementById('addShelfLifeUnit');
-  unitSelect.innerHTML = SHELF_LIFE_UNITS.map(u => `<option value="${u.id}">${u.name}</option>`).join('');
-};
-
-// 拍照/选择图片
-async function takePhoto() {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'image/*';
-  input.capture = 'environment';
-  
-  input.onchange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      const dataUrl = ev.target.result;
-      
-      // 显示预览
-      const preview = document.getElementById('addImagePreview');
-      preview.querySelector('img').src = dataUrl;
-      preview.style.display = 'block';
-      document.getElementById('addImageData').value = dataUrl;
-      
-      // 模拟OCR识别
-      showLoading('正在识别...');
-      await new Promise(r => setTimeout(r, 1500));
-      hideLoading();
-      
-      // 模拟识别结果
-      const mockNames = ['纯牛奶', '酱油', '饼干', '洗发水', '牙膏', '方便面', '矿泉水', '纸巾'];
-      const mockName = mockNames[Math.floor(Math.random() * mockNames.length)];
-      
-      document.getElementById('addName').value = mockName;
-      
-      // 显示OCR结果
-      document.getElementById('addOcrResult').innerHTML = `
-        <div style="padding:8px 12px;background:#e8f5e9;border-radius:8px;font-size:13px;color:#2e7d32;margin-bottom:12px">
-          📷 已识别商品名称：${mockName}
-        </div>
-      `;
-      document.getElementById('addOcrResult').style.display = 'block';
-      
-      showToast('识别完成，请确认信息');
-    };
-    reader.readAsDataURL(file);
-  };
-  
-  input.click();
-}
-
-// 提交商品
-async function submitProduct() {
-  const name = document.getElementById('addName').value.trim();
-  const category = document.querySelector('#addCategoryGrid .selected')?.dataset?.id || 'other';
   const locationId = document.getElementById('addLocation').value;
-  const locationName = document.getElementById('addLocation').selectedOptions[0]?.text || '';
   const quantity = parseInt(document.getElementById('addQuantity').value) || 1;
   const productionDate = document.getElementById('addProductionDate').value;
-  const shelfLife = parseInt(document.getElementById('addShelfLife').value);
+  const shelfLife = document.getElementById('addShelfLife').value;
   const shelfLifeUnit = document.getElementById('addShelfLifeUnit').value;
-  const expiryDate = document.getElementById('addExpiryDate').value;
   const notes = document.getElementById('addNotes').value.trim();
   const imageData = document.getElementById('addImageData').value;
 
-  if (!name) {
-    showToast('请输入商品名称', 'error');
-    return;
+  // 计算过期日期
+  let expiryDate = '';
+  if (productionDate && shelfLife) {
+    expiryDate = calculateExpiryDate(productionDate, parseInt(shelfLife), shelfLifeUnit);
   }
 
-  let finalExpiryDate = expiryDate;
-  if (!finalExpiryDate && productionDate && shelfLife) {
-    finalExpiryDate = calculateExpiryDate(productionDate, shelfLife, shelfLifeUnit);
+  // 获取位置名称
+  let locationName = '';
+  if (locationId) {
+    const locResult = await db.collection(DB.LOCATIONS).doc(locationId).get();
+    locationName = locResult.data ? locResult.data.name : '';
   }
 
-  if (!finalExpiryDate) {
-    showToast('请填写过期日期或生产日期+保质期', 'error');
-    return;
+  // 压缩图片（如果存在）
+  let finalImage = imageData;
+  if (imageData) {
+    finalImage = await compressImage(imageData, 600, 0.6);
   }
 
   const productData = {
     name,
     category,
-    locationId: locationId || '',
+    locationId,
     locationName,
     quantity,
-    productionDate: productionDate || '',
-    shelfLife: shelfLife || 0,
-    shelfLifeUnit: shelfLifeUnit || 'days',
-    expiryDate: finalExpiryDate,
+    productionDate,
+    shelfLife: shelfLife ? parseInt(shelfLife) : '',
+    shelfLifeUnit,
+    expiryDate,
     notes,
-    image: imageData || '',
-    status: 'normal'
+    image: finalImage,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
   };
 
   showLoading('正在保存...');
@@ -282,7 +602,7 @@ async function submitProduct() {
   hideLoading();
 
   showToast('添加成功');
-  setTimeout(() => Router.navigate('products'), 500);
+  Router.navigate('products');
 }
 
 // ========================================
@@ -305,47 +625,59 @@ PageHandlers['product-detail'] = async function() {
 
   document.getElementById('detailHeader').textContent = p.name;
   document.getElementById('detailContent').innerHTML = `
-    ${p.image ? `<img src="${p.image}" class="detail-image" alt="${p.name}" />` : ''}
-    <div class="detail-field">
-      <span class="detail-label">名称</span>
-      <span class="detail-value">${p.name}</span>
+    <!-- 图片区域 -->
+    ${p.image ? `
+      <div class="detail-image-section">
+        <img src="${p.image}" class="detail-image" alt="${p.name}" onclick="previewImage(this.src)" />
+      </div>
+    ` : ''}
+    
+    <!-- 状态横幅 -->
+    <div class="detail-status-banner ${EXPIRY_STATUS_CLASS[info.status]}">
+      <span class="detail-status-icon">${info.status === 'expired' ? '❌' : info.status === 'expiring' ? '⚠️' : '✅'}</span>
+      <span>${info.text}</span>
+      <span class="detail-status-date">${formatDateCN(p.expiryDate)}</span>
     </div>
-    <div class="detail-field">
-      <span class="detail-label">分类</span>
-      <span class="detail-value">${cat.icon} ${cat.name}</span>
-    </div>
-    <div class="detail-field">
-      <span class="detail-label">位置</span>
-      <span class="detail-value">${p.locationName || '未设置'}</span>
-    </div>
-    <div class="detail-field">
-      <span class="detail-label">数量</span>
-      <span class="detail-value">${p.quantity}</span>
-    </div>
-    <div class="detail-field">
-      <span class="detail-label">生产日期</span>
-      <span class="detail-value">${p.productionDate ? formatDateCN(p.productionDate) : '未知'}</span>
-    </div>
-    <div class="detail-field">
-      <span class="detail-label">保质期</span>
-      <span class="detail-value">${p.shelfLife ? `${p.shelfLife}${SHELF_LIFE_UNITS.find(u => u.id === p.shelfLifeUnit)?.name || '天'}` : '未知'}</span>
-    </div>
-    <div class="detail-field">
-      <span class="detail-label">过期日期</span>
-      <span class="detail-value">${formatDateCN(p.expiryDate)}</span>
-    </div>
-    <div class="detail-field">
-      <span class="detail-label">状态</span>
-      <span class="detail-value"><span class="tag ${EXPIRY_STATUS_CLASS[info.status]}">${info.text}</span></span>
-    </div>
-    ${p.notes ? `
-    <div class="detail-field">
-      <span class="detail-label">备注</span>
-      <span class="detail-value">${p.notes}</span>
-    </div>` : ''}
-    <div class="detail-field">
-      <span class="detail-label">创建时间</span>
-      <span class="detail-value">${formatDateTime(p.createdAt)}</span>
+
+    <!-- 信息卡片 -->
+    <div class="detail-info-card">
+      <div class="detail-info-row">
+        <span class="detail-info-label">📌 名称</span>
+        <span class="detail-info-value">${p.name}</span>
+      </div>
+      <div class="detail-info-row">
+        <span class="detail-info-label">🏷️ 分类</span>
+        <span class="detail-info-value">${cat.icon} ${cat.name}</span>
+      </div>
+      <div class="detail-info-row">
+        <span class="detail-info-label">📍 位置</span>
+        <span class="detail-info-value">${p.locationName || '<span style="color:var(--text-light)">未设置</span>'}</span>
+      </div>
+      <div class="detail-info-row">
+        <span class="detail-info-label">🔢 数量</span>
+        <span class="detail-info-value">${p.quantity} 件</span>
+      </div>
+      <div class="detail-info-row">
+        <span class="detail-info-label">📅 生产日期</span>
+        <span class="detail-info-value">${p.productionDate ? formatDateCN(p.productionDate) : '<span style="color:var(--text-light)">未知</span>'}</span>
+      </div>
+      <div class="detail-info-row">
+        <span class="detail-info-label">⏳ 保质期</span>
+        <span class="detail-info-value">${p.shelfLife ? `${p.shelfLife}${SHELF_LIFE_UNITS.find(u => u.id === p.shelfLifeUnit)?.name || '天'}` : '<span style="color:var(--text-light)">未知</span>'}</span>
+      </div>
+      <div class="detail-info-row">
+        <span class="detail-info-label">📆 过期日期</span>
+        <span class="detail-info-value" style="font-weight:600;color:${EXPIRY_STATUS_COLOR[info.status]}">${formatDateCN(p.expiryDate)}</span>
+      </div>
+      ${p.notes ? `
+      <div class="detail-info-row detail-notes-row">
+        <span class="detail-info-label">📝 备注</span>
+        <span class="detail-info-value">${p.notes}</span>
+      </div>` : ''}
+      <div class="detail-info-row" style="border-bottom:none">
+        <span class="detail-info-label">🕐 创建时间</span>
+        <span class="detail-info-value" style="font-size:12px;color:var(--text-light)">${formatDateTime(p.createdAt)}</span>
+      </div>
     </div>
   `;
 
@@ -356,9 +688,25 @@ PageHandlers['product-detail'] = async function() {
   `;
 };
 
+// 图片预览
+function previewImage(src) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:999;display:flex;align-items:center;justify-content:center;cursor:pointer';
+  overlay.onclick = () => overlay.remove();
+  
+  const img = document.createElement('img');
+  img.src = src;
+  img.style.cssText = 'max-width:95%;max-height:95%;object-fit:contain;border-radius:8px';
+  
+  overlay.appendChild(img);
+  document.body.appendChild(overlay);
+}
+
+// ========================================
 // 删除商品
+// ========================================
 async function deleteProduct(id) {
-  const confirmed = await showConfirm('确认删除', '确定要删除这个商品吗？');
+  const confirmed = await showConfirm('确认删除', '确定要删除这个物品吗？');
   if (!confirmed) return;
   
   showLoading('正在删除...');
@@ -370,7 +718,7 @@ async function deleteProduct(id) {
 }
 
 // ========================================
-// 商品编辑
+// 编辑商品
 // ========================================
 PageHandlers['product-edit'] = async function() {
   const id = Router.currentPage.replace('product-edit-', '');
@@ -384,115 +732,118 @@ PageHandlers['product-edit'] = async function() {
     return;
   }
 
-  document.getElementById('editHeader').textContent = `编辑 - ${p.name}`;
-  document.getElementById('editForm').dataset.id = id;
-  document.getElementById('editName').value = p.name;
-  document.getElementById('editQuantity').value = p.quantity;
+  document.getElementById('editName').value = p.name || '';
+  document.getElementById('editQuantity').value = p.quantity || 1;
   document.getElementById('editProductionDate').value = p.productionDate || '';
   document.getElementById('editShelfLife').value = p.shelfLife || '';
   document.getElementById('editShelfLifeUnit').value = p.shelfLifeUnit || 'days';
-  document.getElementById('editExpiryDate').value = p.expiryDate || '';
   document.getElementById('editNotes').value = p.notes || '';
-  
+
   renderCategoryGrid('editCategoryGrid', p.category);
-  renderLocationSelect('editLocation', p.locationId);
-  
-  const unitSelect = document.getElementById('editShelfLifeUnit');
-  unitSelect.innerHTML = SHELF_LIFE_UNITS.map(u => `<option value="${u.id}" ${u.id === p.shelfLifeUnit ? 'selected' : ''}>${u.name}</option>`).join('');
+  await renderLocationSelect('editLocation', p.locationId);
+
+  // 保存编辑 ID
+  document.getElementById('editForm').dataset.id = id;
 };
 
-// 提交编辑
 async function submitEdit() {
   const id = document.getElementById('editForm').dataset.id;
+  if (!id) return;
+
   const name = document.getElementById('editName').value.trim();
-  const category = document.querySelector('#editCategoryGrid .selected')?.dataset?.id || 'other';
+  if (!name) {
+    showToast('请输入物品名称', 'error');
+    return;
+  }
+
+  const selectedCat = document.querySelector('#editCategoryGrid .category-item.selected');
+  const category = selectedCat ? selectedCat.dataset.id : 'other';
+  
   const locationId = document.getElementById('editLocation').value;
-  const locationName = document.getElementById('editLocation').selectedOptions[0]?.text || '';
   const quantity = parseInt(document.getElementById('editQuantity').value) || 1;
   const productionDate = document.getElementById('editProductionDate').value;
-  const shelfLife = parseInt(document.getElementById('editShelfLife').value);
+  const shelfLife = document.getElementById('editShelfLife').value;
   const shelfLifeUnit = document.getElementById('editShelfLifeUnit').value;
-  const expiryDate = document.getElementById('editExpiryDate').value;
   const notes = document.getElementById('editNotes').value.trim();
 
-  if (!name) {
-    showToast('请输入商品名称', 'error');
-    return;
+  let expiryDate = '';
+  if (productionDate && shelfLife) {
+    expiryDate = calculateExpiryDate(productionDate, parseInt(shelfLife), shelfLifeUnit);
   }
 
-  let finalExpiryDate = expiryDate;
-  if (!finalExpiryDate && productionDate && shelfLife) {
-    finalExpiryDate = calculateExpiryDate(productionDate, shelfLife, shelfLifeUnit);
-  }
-
-  if (!finalExpiryDate) {
-    showToast('请填写过期日期', 'error');
-    return;
+  let locationName = '';
+  if (locationId) {
+    const locResult = await db.collection(DB.LOCATIONS).doc(locationId).get();
+    locationName = locResult.data ? locResult.data.name : '';
   }
 
   showLoading('正在保存...');
   await db.collection(DB.PRODUCTS).doc(id).update({
     data: {
-      name, category, locationId, locationName,
-      quantity, productionDate, shelfLife, shelfLifeUnit,
-      expiryDate: finalExpiryDate, notes
+      name, category, locationId, locationName, quantity,
+      productionDate, shelfLife: shelfLife ? parseInt(shelfLife) : '',
+      shelfLifeUnit, expiryDate, notes,
+      updatedAt: new Date().toISOString()
     }
   });
   hideLoading();
 
-  showToast('保存成功');
+  showToast('修改成功');
   Router.navigate(`product-detail-${id}`);
 }
 
 // ========================================
-// 位置管理
+// 位置列表
 // ========================================
 PageHandlers.locations = async function() {
   await renderLocationTree();
 };
 
 async function renderLocationTree() {
-  const container = document.getElementById('locationTree');
   const locations = (await db.collection(DB.LOCATIONS).get()).data;
   const products = (await db.collection(DB.PRODUCTS).get()).data;
-
+  
+  const container = document.getElementById('locationTree');
+  
   if (locations.length === 0) {
-    container.innerHTML = '<div class="empty-state"><div class="empty-icon">🏠</div><div class="empty-text">还没有位置，点击下方 + 添加</div></div>';
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📍</div><div class="empty-text">还没有位置，点击右上角 ＋ 添加</div></div>';
     return;
   }
 
   // 构建树
   const rootLocations = locations.filter(l => !l.parentId);
-  
-  container.innerHTML = rootLocations.map(l => renderTreeNode(l, locations, products)).join('');
+  container.innerHTML = rootLocations.map(loc => renderTreeNode(loc, locations, products)).join('');
 }
 
 function renderTreeNode(node, allLocations, products) {
   const children = allLocations.filter(l => l.parentId === node._id);
-  const itemCount = products.filter(p => p.locationId === node._id).length;
-  const hasChildren = children.length > 0;
-
-  return `
+  const productCount = products.filter(p => p.locationId === node._id).length;
+  
+  let html = `
     <li class="tree-item">
-      <div class="tree-item-content" onclick="Router.navigate('location-detail-${node._id}')">
-        ${hasChildren ? '<span class="tree-toggle" onclick="event.stopPropagation();toggleTree(this)">▶</span>' : '<span class="tree-toggle" style="visibility:hidden">▶</span>'}
-        <span class="tree-icon">📂</span>
+      <div class="tree-node" onclick="Router.navigate('location-detail-${node._id}')">
+        <span class="tree-icon">📁</span>
         <span class="tree-name">${node.name}</span>
-        <span class="tree-count">${itemCount}件</span>
+        <span class="tree-count">${productCount}件</span>
       </div>
-      ${hasChildren ? `
-        <ul class="tree-children">
-          ${children.map(c => renderTreeNode(c, allLocations, products)).join('')}
-        </ul>
-      ` : ''}
-    </li>
   `;
+  
+  if (children.length > 0) {
+    html += '<ul class="tree-children">';
+    html += children.map(child => renderTreeNode(child, allLocations, products)).join('');
+    html += '</ul>';
+  }
+  
+  html += '</li>';
+  return html;
 }
 
 function toggleTree(el) {
-  el.classList.toggle('expanded');
-  const children = el.closest('.tree-item').querySelector('.tree-children');
-  if (children) children.classList.toggle('expanded');
+  const parent = el.closest('.tree-item');
+  const children = parent.querySelector('.tree-children');
+  if (children) {
+    children.style.display = children.style.display === 'none' ? 'block' : 'none';
+  }
 }
 
 // ========================================
@@ -501,40 +852,23 @@ function toggleTree(el) {
 PageHandlers['location-detail'] = async function() {
   const id = Router.currentPage.replace('location-detail-', '');
   if (!id) return;
-
+  
   const locResult = await db.collection(DB.LOCATIONS).doc(id).get();
-  const location = locResult.data;
-  if (!location) {
+  const loc = locResult.data;
+  if (!loc) {
     showToast('位置不存在', 'error');
     Router.navigate('locations');
     return;
   }
 
-  document.getElementById('locDetailHeader').textContent = location.name;
+  document.getElementById('locDetailTitle').textContent = loc.name;
 
-  // 子位置
-  const allLocations = (await db.collection(DB.LOCATIONS).get()).data;
-  const children = allLocations.filter(l => l.parentId === id);
-  
-  const childrenHtml = children.length > 0
-    ? children.map(c => `
-      <div class="product-item" onclick="Router.navigate('location-detail-${c._id}')">
-        <div class="product-icon">📂</div>
-        <div class="product-info">
-          <div class="product-name">${c.name}</div>
-        </div>
-        <div class="product-right">➡️</div>
-      </div>
-    `).join('')
-    : '<div class="empty-state"><div class="empty-text" style="padding:16px">暂无子位置</div></div>';
+  // 获取该位置下的商品
+  const products = (await db.collection(DB.PRODUCTS).get()).data;
+  const locProducts = products.filter(p => p.locationId === id);
 
-  document.getElementById('locChildren').innerHTML = childrenHtml;
-
-  // 位置中的商品
-  const products = (await db.collection(DB.PRODUCTS).where({ locationId: id }).get()).data;
-  
-  const productsHtml = products.length > 0
-    ? products.map(p => {
+  const productsHtml = locProducts.length > 0
+    ? locProducts.map(p => {
         const info = getExpiryInfo(p.expiryDate);
         const cat = CATEGORIES.find(c => c.id === p.category) || CATEGORIES[CATEGORIES.length - 1];
         return `
@@ -632,129 +966,562 @@ function getAllChildIds(parentId, allLocations) {
 }
 
 // ========================================
-// 搜索
+// 辅助函数
 // ========================================
-PageHandlers.search = function() {
-  document.getElementById('searchInput').value = '';
-  document.getElementById('searchResults').innerHTML = '';
-  renderSearchHistory();
-};
 
-// 搜索商品
-const doSearch = debounce(async function() {
-  const keyword = document.getElementById('searchInput').value.trim();
-  if (!keyword) {
-    document.getElementById('searchResults').innerHTML = '';
-    return;
-  }
-
-  showLoading('搜索中...');
-  
-  const products = (await db.collection(DB.PRODUCTS).get()).data;
-  const results = products.filter(p => {
-    return p.name.includes(keyword) || 
-           (p.locationName && p.locationName.includes(keyword)) ||
-           (p.notes && p.notes.includes(keyword));
-  });
-
-  hideLoading();
-
-  // 保存搜索历史
-  saveSearchHistory(keyword);
-
-  if (results.length === 0) {
-    document.getElementById('searchResults').innerHTML = '<div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">未找到匹配的商品</div></div>';
-  } else {
-    document.getElementById('searchResults').innerHTML = results.map(p => {
-      const info = getExpiryInfo(p.expiryDate);
-      const cat = CATEGORIES.find(c => c.id === p.category) || CATEGORIES[CATEGORIES.length - 1];
-      return `
-        <div class="product-item" onclick="Router.navigate('product-detail-${p._id}')">
-          <div class="product-icon">${cat.icon}</div>
-          <div class="product-info">
-            <div class="product-name">${highlightKeyword(p.name, keyword)}</div>
-            <div class="product-meta">${p.locationName || '未设置位置'} · ${formatDate(p.expiryDate)}</div>
-          </div>
-          <div class="product-right">
-            <span class="tag ${EXPIRY_STATUS_CLASS[info.status]}">${info.text}</span>
-          </div>
-        </div>
-      `;
-    }).join('');
-  }
-
-  document.getElementById('searchHistory').style.display = 'none';
-}, 300);
-
-function highlightKeyword(text, keyword) {
-  if (!text || !keyword) return text || '';
-  const regex = new RegExp(`(${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-  return text.replace(regex, '<strong style="color:var(--primary)">$1</strong>');
-}
-
-function saveSearchHistory(keyword) {
-  let history = JSON.parse(localStorage.getItem('search_history') || '[]');
-  history = history.filter(h => h !== keyword);
-  history.unshift(keyword);
-  if (history.length > 10) history = history.slice(0, 10);
-  localStorage.setItem('search_history', JSON.stringify(history));
-  renderSearchHistory();
-}
-
-function renderSearchHistory() {
-  const history = JSON.parse(localStorage.getItem('search_history') || '[]');
-  const container = document.getElementById('searchHistoryTags');
-  
-  if (history.length === 0) {
-    document.getElementById('searchHistory').style.display = 'none';
-    return;
-  }
-
-  document.getElementById('searchHistory').style.display = 'block';
-  container.innerHTML = history.map(h => `
-    <span class="history-tag" onclick="document.getElementById('searchInput').value='${h.replace(/'/g, "\\'")}';doSearch()">
-      ${h}
-      <button class="remove-btn" onclick="event.stopPropagation();removeSearchHistory('${h.replace(/'/g, "\\'")}')">×</button>
-    </span>
+// 渲染分类网格
+function renderCategoryGrid(containerId, selectedId) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = CATEGORIES.map(c => `
+    <div class="category-item ${c.id === selectedId ? 'selected' : ''}"
+         data-id="${c.id}"
+         onclick="selectCategory(this, '${containerId}')">
+      <span class="cat-icon">${c.icon}</span>
+      <span class="cat-name">${c.name}</span>
+    </div>
   `).join('');
 }
 
-function removeSearchHistory(keyword) {
-  let history = JSON.parse(localStorage.getItem('search_history') || '[]');
-  history = history.filter(h => h !== keyword);
-  localStorage.setItem('search_history', JSON.stringify(history));
-  renderSearchHistory();
+function selectCategory(el, containerId) {
+  document.querySelectorAll(`#${containerId} .category-item`).forEach(item => {
+    item.classList.remove('selected');
+  });
+  el.classList.add('selected');
 }
 
-function clearSearchHistory() {
-  localStorage.removeItem('search_history');
-  renderSearchHistory();
-}
-
-// ========================================
-// 个人中心
-// ========================================
-PageHandlers.mine = async function() {
-  const products = (await db.collection(DB.PRODUCTS).get()).data;
+// 渲染位置下拉
+async function renderLocationSelect(selectId, selectedId) {
+  const select = document.getElementById(selectId);
   const locations = (await db.collection(DB.LOCATIONS).get()).data;
   
-  document.getElementById('mineStats').innerHTML = `
-    <div style="display:flex;justify-content:space-around;padding:16px 0">
-      <div style="text-align:center">
-        <div style="font-size:24px;font-weight:700;color:var(--primary)">${products.length}</div>
-        <div style="font-size:12px;color:var(--text-light)">商品</div>
+  if (locations.length === 0) {
+    // 没有位置时显示提示和快速添加入口
+    select.innerHTML = '<option value="">暂无位置，请先添加</option>';
+    
+    // 在位置选择下方添加快速添加按钮
+    const formGroup = select.closest('.form-group');
+    let quickAddBtn = formGroup.querySelector('.quick-add-location');
+    if (!quickAddBtn) {
+      quickAddBtn = document.createElement('div');
+      quickAddBtn.className = 'quick-add-location';
+      quickAddBtn.style.cssText = 'margin-top:8px';
+      quickAddBtn.innerHTML = `
+        <button type="button" class="btn btn-sm btn-secondary" onclick="quickAddLocation('${selectId}')" style="width:100%">
+          ➕ 快速添加位置
+        </button>
+      `;
+      formGroup.appendChild(quickAddBtn);
+    }
+    return;
+  }
+  
+  // 移除快速添加按钮（如果有）
+  const formGroup = select.closest('.form-group');
+  const existingBtn = formGroup.querySelector('.quick-add-location');
+  if (existingBtn) existingBtn.remove();
+  
+  let html = '<option value="">未选择位置</option>';
+  html += buildLocationOptions(locations, null, 0, selectedId);
+  select.innerHTML = html;
+}
+
+// 快速添加位置（从添加商品页面）
+async function quickAddLocation(selectId) {
+  const name = prompt('请输入位置名称（如：冰箱、厨房、客厅）：');
+  if (!name || !name.trim()) return;
+  
+  showLoading('正在添加...');
+  await db.collection(DB.LOCATIONS).add({
+    data: { name: name.trim(), parentId: '' }
+  });
+  hideLoading();
+  
+  showToast('位置添加成功');
+  // 重新渲染位置下拉
+  renderLocationSelect(selectId);
+}
+
+function buildLocationOptions(locations, parentId, level, selectedId) {
+  let html = '';
+  const children = locations.filter(l => l.parentId === (parentId || ''));
+  const prefix = '　'.repeat(level);
+  
+  for (const loc of children) {
+    html += `<option value="${loc._id}" ${loc._id === selectedId ? 'selected' : ''}>${prefix}${loc.name}</option>`;
+    html += buildLocationOptions(locations, loc._id, level + 1, selectedId);
+  }
+  
+  return html;
+}
+
+// ========================================
+// 我的 - 页面处理器
+// ========================================
+PageHandlers.mine = async function() {
+  const user = Family.getCurrentUser();
+  const family = Family.getCurrent();
+
+  // 更新用户信息
+  document.getElementById('mineNickname').textContent = user.nickname;
+  document.getElementById('mineFamilyName').textContent = family ? `${family.name} · ${Family.getRoleText(user.role)}` : '未加入家庭';
+
+  // 渲染家庭管理区域
+  const section = document.getElementById('mineFamilySection');
+  
+  if (!family) {
+    // 未加入家庭 - 显示创建/加入选项
+    section.innerHTML = `
+      <div class="mine-card">
+        <div class="mine-card-desc">加入家庭后，所有家庭成员可以共享物品数据</div>
+        <div class="mine-card-actions">
+          <button class="btn btn-primary" onclick="showCreateFamily()" style="flex:1">🏠 创建家庭</button>
+          <button class="btn btn-secondary" onclick="showJoinFamily()" style="flex:1">🔑 加入家庭</button>
+        </div>
       </div>
-      <div style="text-align:center">
-        <div style="font-size:24px;font-weight:700;color:var(--warning)">${locations.length}</div>
-        <div style="font-size:12px;color:var(--text-light)">位置</div>
+    `;
+  } else {
+    // 已加入家庭 - 显示家庭信息
+    const members = family.members;
+    const inviteCode = Family.getInviteCode();
+    const isOwner = user.role === 'owner';
+
+    section.innerHTML = `
+      <div class="mine-card">
+        <div class="mine-card-title">${family.name}</div>
+        <div class="mine-card-desc">共 ${members.length} 位成员</div>
+        
+        <!-- 成员列表 -->
+        <div class="family-members">
+          ${members.map(m => {
+            const isMe = m.id === user.id;
+            const canManage = isOwner && m.role !== 'owner';
+            return `
+              <div class="family-member-item">
+                <span class="member-avatar">${m.role === 'owner' ? '👑' : m.role === 'admin' ? '⭐' : '👤'}</span>
+                <span class="member-name">${m.nickname}${isMe ? ' (我)' : ''}</span>
+                <span class="member-role tag tag-${m.role}">${Family.getRoleText(m.role)}</span>
+                ${canManage ? `
+                  <select class="member-role-select" onchange="changeMemberRole('${m.id}', this.value)">
+                    <option value="admin" ${m.role === 'admin' ? 'selected' : ''}>管理员</option>
+                    <option value="member" ${m.role === 'member' ? 'selected' : ''}>成员</option>
+                    <option value="viewer" ${m.role === 'viewer' ? 'selected' : ''}>仅查看</option>
+                  </select>
+                  <button class="member-remove-btn" onclick="removeFamilyMember('${m.id}')">✕</button>
+                ` : ''}
+              </div>
+            `;
+          }).join('')}
+        </div>
+
+        <!-- 邀请码 -->
+        ${inviteCode ? `
+          <div class="invite-code-section">
+            <div class="invite-code-label">邀请码</div>
+            <div class="invite-code-value" onclick="copyInviteCode()">
+              <span>${inviteCode}</span>
+              <span class="invite-code-copy">📋 复制</span>
+            </div>
+            <div class="invite-code-hint">分享此邀请码给家人，他们可以加入家庭</div>
+            ${isOwner ? `<button class="btn btn-sm btn-secondary" onclick="refreshInviteCode()" style="margin-top:8px">🔄 刷新邀请码</button>` : ''}
+          </div>
+        ` : ''}
+
+        <!-- 操作按钮 -->
+        <div style="margin-top:12px;display:flex;gap:8px">
+          ${isOwner ? `
+            <button class="btn btn-danger btn-sm" onclick="deleteFamily()" style="flex:1">🗑️ 删除家庭</button>
+          ` : `
+            <button class="btn btn-secondary btn-sm" onclick="leaveFamily()" style="flex:1">🚪 退出家庭</button>
+          `}
+        </div>
       </div>
-      <div style="text-align:center">
-        <div style="font-size:24px;font-weight:700;color:var(--danger)">${products.filter(p => { const i = getExpiryInfo(p.expiryDate); return i.status === 'expired'; }).length}</div>
-        <div style="font-size:12px;color:var(--text-light)">已过期</div>
+    `;
+  }
+
+  // 渲染云端同步状态
+  renderSyncStatus();
+};
+
+// ========================================
+// 云端同步 UI
+// ========================================
+
+// 渲染同步状态
+function renderSyncStatus() {
+  const container = document.getElementById('mineSyncSection');
+  const status = SyncManager.getStatus();
+
+  if (!status.connected) {
+    container.innerHTML = `
+      <div class="sync-status-card">
+        <div class="sync-status-row">
+          <span class="sync-label">状态</span>
+          <span class="sync-value"><span class="sync-status-dot disconnected"></span>未连接</span>
+        </div>
+        <div class="sync-actions">
+          <button class="btn btn-primary" onclick="showSyncConfig()" style="flex:1">☁️ 配置同步</button>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  const lastSync = status.lastSync ? formatDateTime(status.lastSync) : '尚未同步';
+  const providerIcon = status.provider === 'jianguo' ? '🥜' : '☁️';
+
+  container.innerHTML = `
+    <div class="sync-status-card">
+      <div class="sync-status-row">
+        <span class="sync-label">状态</span>
+        <span class="sync-value"><span class="sync-status-dot connected"></span>已连接</span>
+      </div>
+      <div class="sync-status-row">
+        <span class="sync-label">服务</span>
+        <span class="sync-value">${providerIcon} ${status.providerName || 'WebDAV'}</span>
+      </div>
+      <div class="sync-status-row">
+        <span class="sync-label">上次同步</span>
+        <span class="sync-value">${lastSync}</span>
+      </div>
+      <div class="sync-actions">
+        <button class="btn btn-primary" onclick="doSync()" style="flex:1">🔄 立即同步</button>
+        <button class="btn btn-secondary" onclick="showSyncConfig()" style="flex:1">⚙️ 设置</button>
+      </div>
+      <div style="margin-top:8px;text-align:center">
+        <button class="btn btn-sm" onclick="disconnectSync()" style="color:var(--danger);background:none;border:none;font-size:12px;cursor:pointer">断开连接</button>
       </div>
     </div>
   `;
-};
+}
+
+// 显示同步配置弹窗
+function showSyncConfig() {
+  const existing = document.querySelector('.sync-modal-overlay');
+  if (existing) existing.remove();
+
+  const presets = SyncConfig.getPresets();
+  const currentConfig = SyncConfig.get();
+  const selectedProvider = currentConfig ? (currentConfig.provider || 'custom') : 'jianguo';
+
+  const overlay = document.createElement('div');
+  overlay.className = 'sync-modal-overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+  overlay.innerHTML = `
+    <div class="sync-modal">
+      <div class="sync-modal-title">☁️ 云端同步配置</div>
+      
+      <div class="sync-provider-list">
+        ${presets.map(p => `
+          <div class="sync-provider-item ${p.id === selectedProvider ? 'selected' : ''}"
+               data-provider="${p.id}"
+               onclick="selectSyncProvider('${p.id}')">
+            <div class="sync-provider-icon">${p.icon}</div>
+            <div class="sync-provider-name">${p.name}</div>
+            <div class="sync-provider-desc">${p.desc}</div>
+          </div>
+        `).join('')}
+      </div>
+
+      <div class="sync-config-form" id="syncConfigForm">
+        <div class="form-group" id="syncUrlGroup">
+          <label class="form-label">服务器地址</label>
+          <input type="url" class="form-input" id="syncUrl" placeholder="${selectedProvider === 'jianguo' ? 'https://dav.jianguoyun.com/dav/' : 'https://example.com/remote.php/dav/'}" />
+          <div class="form-hint" id="syncUrlHint">
+            ${selectedProvider === 'jianguo'
+              ? '坚果云 WebDAV 地址：<a href="https://help.jianguoyun.com/?p=2064" target="_blank">如何获取？</a>'
+              : '请输入您的 WebDAV 服务器地址'}
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">用户名</label>
+          <input type="text" class="form-input" id="syncUsername" placeholder="请输入用户名 / 邮箱" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">密码</label>
+          <input type="password" class="form-input" id="syncPassword" placeholder="请输入密码 / 应用密码" />
+          <div class="form-hint" id="syncPasswordHint">
+            ${selectedProvider === 'jianguo'
+              ? '坚果云请使用<strong>应用密码</strong>，不是登录密码。<a href="https://help.jianguoyun.com/?p=2064" target="_blank">如何设置？</a>'
+              : '请输入您的 WebDAV 密码'}
+          </div>
+        </div>
+      </div>
+
+      <div class="sync-modal-actions">
+        <button class="btn btn-secondary" onclick="this.closest('.sync-modal-overlay').remove()">取消</button>
+        <button class="btn btn-secondary" onclick="testSyncConnection()">🔌 测试连接</button>
+        <button class="btn btn-primary" onclick="saveSyncConfig()">💾 保存</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  // 填充已有配置
+  if (currentConfig) {
+    document.getElementById('syncUrl').value = currentConfig.url || '';
+    document.getElementById('syncUsername').value = currentConfig.username || '';
+    document.getElementById('syncPassword').value = currentConfig.password || '';
+  } else {
+    // 默认填充坚果云地址
+    if (selectedProvider === 'jianguo') {
+      document.getElementById('syncUrl').value = 'https://dav.jianguoyun.com/dav/';
+    }
+  }
+}
+
+// 选择同步服务商
+function selectSyncProvider(providerId) {
+  document.querySelectorAll('.sync-provider-item').forEach(item => {
+    item.classList.toggle('selected', item.dataset.provider === providerId);
+  });
+
+  const presets = SyncConfig.getPresets();
+  const preset = presets.find(p => p.id === providerId);
+
+  const urlInput = document.getElementById('syncUrl');
+  const urlHint = document.getElementById('syncUrlHint');
+  const passwordHint = document.getElementById('syncPasswordHint');
+
+  if (providerId === 'jianguo') {
+    urlInput.placeholder = 'https://dav.jianguoyun.com/dav/';
+    urlInput.value = 'https://dav.jianguoyun.com/dav/';
+    urlHint.innerHTML = '坚果云 WebDAV 地址：<a href="https://help.jianguoyun.com/?p=2064" target="_blank">如何获取？</a>';
+    passwordHint.innerHTML = '坚果云请使用<strong>应用密码</strong>，不是登录密码。<a href="https://help.jianguoyun.com/?p=2064" target="_blank">如何设置？</a>';
+  } else {
+    urlInput.placeholder = 'https://example.com/remote.php/dav/';
+    urlInput.value = '';
+    urlHint.textContent = '请输入您的 WebDAV 服务器地址';
+    passwordHint.innerHTML = '请输入您的 WebDAV 密码';
+  }
+}
+
+// 测试同步连接
+async function testSyncConnection() {
+  const config = getSyncFormConfig();
+  if (!config) return;
+
+  const testBtn = document.querySelector('.sync-modal-actions .btn-secondary:not(:first-child)');
+  const originalText = testBtn.textContent;
+  testBtn.textContent = '⏳ 测试中...';
+  testBtn.disabled = true;
+
+  const result = await SyncManager.configure(config);
+
+  testBtn.textContent = originalText;
+  testBtn.disabled = false;
+
+  if (result.success) {
+    showToast('✅ 连接成功！');
+    // 重新渲染同步状态
+    renderSyncStatus();
+  } else {
+    showToast('❌ ' + (result.message || '连接失败'), 'error');
+  }
+}
+
+// 保存同步配置
+async function saveSyncConfig() {
+  const config = getSyncFormConfig();
+  if (!config) return;
+
+  showLoading('正在保存配置...');
+  const result = await SyncManager.configure(config);
+  hideLoading();
+
+  if (result.success) {
+    showToast('配置已保存');
+    document.querySelector('.sync-modal-overlay')?.remove();
+    renderSyncStatus();
+  } else {
+    showToast('❌ ' + (result.message || '配置失败'), 'error');
+  }
+}
+
+// 获取表单配置
+function getSyncFormConfig() {
+  const selectedItem = document.querySelector('.sync-provider-item.selected');
+  const providerId = selectedItem ? selectedItem.dataset.provider : 'custom';
+  const presets = SyncConfig.getPresets();
+  const preset = presets.find(p => p.id === providerId);
+
+  const url = document.getElementById('syncUrl').value.trim();
+  const username = document.getElementById('syncUsername').value.trim();
+  const password = document.getElementById('syncPassword').value.trim();
+
+  if (!url) {
+    showToast('请输入服务器地址', 'error');
+    return null;
+  }
+  if (!username) {
+    showToast('请输入用户名', 'error');
+    return null;
+  }
+  if (!password) {
+    showToast('请输入密码', 'error');
+    return null;
+  }
+
+  return {
+    provider: providerId,
+    providerName: preset ? preset.name : 'WebDAV',
+    url,
+    username,
+    password
+  };
+}
+
+// 执行同步
+async function doSync() {
+  const status = SyncManager.getStatus();
+  if (!status.connected) {
+    showToast('请先配置云端同步', 'error');
+    return;
+  }
+
+  showLoading('正在同步...');
+  const result = await SyncManager.sync();
+  hideLoading();
+
+  if (result.success) {
+    showToast('✅ ' + (result.message || '同步成功'));
+    renderSyncStatus();
+  } else {
+    showToast('❌ ' + (result.message || '同步失败'), 'error');
+  }
+}
+
+// 断开同步连接
+function disconnectSync() {
+  showConfirm('断开连接', '确定要断开云端同步连接吗？配置信息将被清除。').then(confirmed => {
+    if (!confirmed) return;
+    SyncManager.disconnect();
+    showToast('已断开连接');
+    renderSyncStatus();
+  });
+}
+
+// ========================================
+// 家庭管理 UI
+// ========================================
+
+// 显示创建家庭弹窗
+function showCreateFamily() {
+  const name = prompt('请输入家庭名称（如：幸福之家）：');
+  if (!name || !name.trim()) return;
+  
+  const nickname = prompt('请输入您的昵称：', localStorage.getItem('current_user_nickname') || '');
+  if (!nickname || !nickname.trim()) return;
+
+  const result = Family.createFamily(name.trim(), nickname.trim());
+  if (result.success) {
+    showToast('家庭创建成功！');
+    Router.navigate('mine');
+  } else {
+    showToast(result.message, 'error');
+  }
+}
+
+// 显示加入家庭弹窗
+function showJoinFamily() {
+  const inviteCode = prompt('请输入家庭邀请码（演示：输入 FAMILY）：');
+  if (!inviteCode || !inviteCode.trim()) return;
+  
+  const nickname = prompt('请输入您的昵称：', localStorage.getItem('current_user_nickname') || '');
+  if (!nickname || !nickname.trim()) return;
+
+  const result = Family.joinFamily(inviteCode.trim(), nickname.trim());
+  if (result.success) {
+    showToast('加入家庭成功！');
+    Router.navigate('mine');
+  } else {
+    showToast(result.message, 'error');
+  }
+}
+
+// 退出家庭
+async function leaveFamily() {
+  const confirmed = await showConfirm('退出家庭', '确定要退出当前家庭吗？');
+  if (!confirmed) return;
+  
+  const result = Family.leaveFamily();
+  if (result.success) {
+    showToast('已退出家庭');
+    Router.navigate('mine');
+  } else {
+    showToast(result.message, 'error');
+  }
+}
+
+// 删除家庭
+async function deleteFamily() {
+  const confirmed = await showConfirm('删除家庭', '确定要删除整个家庭吗？所有成员数据将丢失！');
+  if (!confirmed) return;
+  
+  const confirmed2 = await showConfirm('再次确认', '此操作不可恢复！');
+  if (!confirmed2) return;
+  
+  const result = Family.deleteFamily();
+  if (result.success) {
+    showToast('家庭已删除');
+    Router.navigate('mine');
+  } else {
+    showToast(result.message, 'error');
+  }
+}
+
+// 修改成员角色
+function changeMemberRole(memberId, newRole) {
+  const result = Family.setMemberRole(memberId, newRole);
+  if (result.success) {
+    showToast('角色已更新');
+    Router.navigate('mine');
+  } else {
+    showToast(result.message, 'error');
+  }
+}
+
+// 移除成员
+async function removeFamilyMember(memberId) {
+  const confirmed = await showConfirm('移除成员', '确定要移除该成员吗？');
+  if (!confirmed) return;
+  
+  const result = Family.removeMember(memberId);
+  if (result.success) {
+    showToast('成员已移除');
+    Router.navigate('mine');
+  } else {
+    showToast(result.message, 'error');
+  }
+}
+
+// 复制邀请码
+function copyInviteCode() {
+  const family = Family.getCurrent();
+  if (family && family.inviteCode) {
+    navigator.clipboard.writeText(family.inviteCode).then(() => {
+      showToast('邀请码已复制');
+    }).catch(() => {
+      showToast('复制失败，请手动复制', 'error');
+    });
+  }
+}
+
+// 刷新邀请码
+function refreshInviteCode() {
+  const result = Family.refreshInviteCode();
+  if (result.success) {
+    showToast('邀请码已刷新');
+    Router.navigate('mine');
+  } else {
+    showToast(result.message, 'error');
+  }
+}
+
+// ========================================
+// 导出 / 导入 / 清除数据
+// ========================================
 
 // 清除所有数据
 async function clearAllData() {
@@ -798,8 +1565,8 @@ function exportData() {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url;
   a.download = `家庭物品管理_备份_${formatDate(new Date())}.json`;
+  a.href = url;
   a.click();
   URL.revokeObjectURL(url);
   
@@ -841,53 +1608,6 @@ function importData() {
 }
 
 // ========================================
-// 辅助函数
-// ========================================
-
-// 渲染分类网格
-function renderCategoryGrid(containerId, selectedId) {
-  const container = document.getElementById(containerId);
-  container.innerHTML = CATEGORIES.map(c => `
-    <div class="category-item ${c.id === selectedId ? 'selected' : ''}" 
-         data-id="${c.id}" 
-         onclick="selectCategory(this, '${containerId}')">
-      <span class="cat-icon">${c.icon}</span>
-      <span class="cat-name">${c.name}</span>
-    </div>
-  `).join('');
-}
-
-function selectCategory(el, containerId) {
-  document.querySelectorAll(`#${containerId} .category-item`).forEach(item => {
-    item.classList.remove('selected');
-  });
-  el.classList.add('selected');
-}
-
-// 渲染位置下拉
-async function renderLocationSelect(selectId, selectedId) {
-  const select = document.getElementById(selectId);
-  const locations = (await db.collection(DB.LOCATIONS).get()).data;
-  
-  let html = '<option value="">未选择位置</option>';
-  html += buildLocationOptions(locations, null, 0, selectedId);
-  select.innerHTML = html;
-}
-
-function buildLocationOptions(locations, parentId, level, selectedId) {
-  let html = '';
-  const children = locations.filter(l => l.parentId === (parentId || ''));
-  const prefix = '　'.repeat(level);
-  
-  for (const loc of children) {
-    html += `<option value="${loc._id}" ${loc._id === selectedId ? 'selected' : ''}>${prefix}${loc.name}</option>`;
-    html += buildLocationOptions(locations, loc._id, level + 1, selectedId);
-  }
-  
-  return html;
-}
-
-// ========================================
 // 全局错误处理
 // ========================================
 window.addEventListener('error', function(e) {
@@ -906,6 +1626,14 @@ window.addEventListener('unhandledrejection', function(e) {
 // ========================================
 document.addEventListener('DOMContentLoaded', () => {
   Router.init();
+
+  // 首页搜索框聚焦时显示搜索历史
+  document.getElementById('homeSearchInput').addEventListener('focus', function() {
+    const keyword = this.value.trim();
+    if (!keyword) {
+      renderHomeSearchHistory();
+    }
+  });
   
   // 注册 Service Worker - 使用 update 模式确保新 SW 能激活
   if ('serviceWorker' in navigator) {

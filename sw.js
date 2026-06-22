@@ -1,10 +1,10 @@
 /**
  * Service Worker - 家庭物品管理 PWA
  * 提供离线缓存支持
- * 版本: 2026-06-18
+ * 版本: 2026-06-22
  */
 
-const CACHE_NAME = 'home-inventory-v2';
+const CACHE_NAME = 'home-inventory-v4';
 const ASSETS_TO_CACHE = [
   '.',
   'index.html',
@@ -13,6 +13,8 @@ const ASSETS_TO_CACHE = [
   'js/constants.js',
   'js/db.js',
   'js/util.js',
+  'js/family.js',
+  'js/sync.js',
   'js/app.js',
   'icons/icon-192.png',
   'icons/icon-512.png'
