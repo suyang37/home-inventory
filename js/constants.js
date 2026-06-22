@@ -10,17 +10,18 @@ const DB = {
 };
 
 const CATEGORIES = [
-  { id: 'food', name: '食品', icon: '🍚' },
-  { id: 'beverage', name: '饮料', icon: '🥤' },
-  { id: 'condiment', name: '调味品', icon: '🧂' },
-  { id: 'daily', name: '日用品', icon: '🧴' },
-  { id: 'medicine', name: '药品', icon: '💊' },
-  { id: 'cosmetic', name: '化妆品', icon: '💄' },
-  { id: 'electronics', name: '电子产品', icon: '📱' },
-  { id: 'clothing', name: '衣物', icon: '👕' },
-  { id: 'book', name: '书籍', icon: '📚' },
-  { id: 'tool', name: '工具', icon: '🔧' },
-  { id: 'other', name: '其他', icon: '📦' }
+  { id: 'food', name: '食品', icon: '🍚', type: 'food' },
+  { id: 'beverage', name: '饮料', icon: '🥤', type: 'food' },
+  { id: 'condiment', name: '调味品', icon: '🧂', type: 'food' },
+  { id: 'short_shelf', name: '短保食品', icon: '🥖', type: 'food' },
+  { id: 'daily', name: '日用品', icon: '🧴', type: 'nonfood' },
+  { id: 'medicine', name: '药品', icon: '💊', type: 'nonfood' },
+  { id: 'cosmetic', name: '化妆品', icon: '💄', type: 'nonfood' },
+  { id: 'electronics', name: '电子产品', icon: '📱', type: 'nonfood' },
+  { id: 'clothing', name: '衣物', icon: '👕', type: 'nonfood' },
+  { id: 'book', name: '书籍', icon: '📚', type: 'nonfood' },
+  { id: 'tool', name: '工具', icon: '🔧', type: 'nonfood' },
+  { id: 'other', name: '其他', icon: '📦', type: 'nonfood' }
 ];
 
 const SHELF_LIFE_UNITS = [

@@ -9,6 +9,8 @@
   <title>家庭物品管理</title>
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="css/style.css?v=6">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 </head>
 <body>
   <div id="app">
@@ -120,7 +122,10 @@
             <button type="button" class="image-preview-remove" onclick="removeAddImage()">×</button>
           </div>
           <div class="camera-btn" onclick="takePhoto()">
-            📷 拍照识别（AI）
+            📷 拍照识别
+          </div>
+          <div style="font-size:12px;color:var(--text-light);text-align:center;margin-top:-8px;margin-bottom:12px">
+            默认使用基础文字识别，如需更高准确度可到「我的」页面配置 AI 识别
           </div>
           <input type="hidden" id="addImageData">
           <div class="form-group">

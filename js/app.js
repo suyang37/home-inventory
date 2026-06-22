@@ -283,8 +283,8 @@ let selectedIds = new Set();
 let currentItemFilter = 'all'; // 'all', 'food', 'nonfood'
 let currentStatusFilter = 'all'; // 'all', 'normal', 'expiring', 'expired'
 
-// 食品分类列表
-const FOOD_CATEGORIES = ['food', 'beverage', 'condiment'];
+// 食品分类列表（从 CATEGORIES 中提取 type 为 food 的分类）
+const FOOD_CATEGORIES = CATEGORIES.filter(c => c.type === 'food').map(c => c.id);
 
 PageHandlers.manage = async function() {
   // 解析 URL 参数
@@ -388,14 +388,15 @@ async function renderManageItems() {
       }
       
       return `
-        <div class="product-item" onclick="Router.navigate('product-detail-${p._id}')">
-          <div class="product-icon">${cat.icon}</div>
-          <div class="product-info">
+        <div class="product-item">
+          <div class="product-icon" onclick="Router.navigate('product-detail-${p._id}')">${cat.icon}</div>
+          <div class="product-info" onclick="Router.navigate('product-detail-${p._id}')">
             <div class="product-name">${p.name}</div>
             <div class="product-meta">${p.locationName || '未设置位置'} · ${expiryText}</div>
           </div>
           <div class="product-right">
-            <span class="tag ${statusClass}">${statusText}</span>
+            <span class="tag ${statusClass}" onclick="Router.navigate('product-detail-${p._id}')">${statusText}</span>
+            <button class="product-delete-btn" onclick="event.stopPropagation();deleteProduct('${p._id}')" title="删除">🗑️</button>
           </div>
         </div>
       `;
@@ -547,31 +548,72 @@ async function takePhoto() {
         preview.style.display = 'block';
         document.getElementById('addImageData').value = compressedDataUrl;
 
-        showLoading('AI 识别中...');
-
-        try {
-          const result = await AIClient.recognize(compressedDataUrl);
-          hideLoading();
-          
-          if (result && result.name) {
-            document.getElementById('addName').value = result.name;
-            // 选中匹配的分类
-            const catItems = document.querySelectorAll('#addCategoryGrid .category-item');
-            catItems.forEach(item => {
-              if (item.dataset.id === result.category) {
-                item.classList.add('selected');
-              } else {
-                item.classList.remove('selected');
+        // 检查是否配置了 AI
+        const aiConfig = AIConfig.get();
+        
+        if (aiConfig && aiConfig.apiKey) {
+          // 使用 AI 识别
+          showLoading('AI 识别中...');
+          try {
+            const result = await AIClient.recognize(compressedDataUrl);
+            hideLoading();
+            
+            if (result && result.name) {
+              document.getElementById('addName').value = result.name;
+              // 选中匹配的分类
+              const catItems = document.querySelectorAll('#addCategoryGrid .category-item');
+              catItems.forEach(item => {
+                if (item.dataset.id === result.category) {
+                  item.classList.add('selected');
+                } else {
+                  item.classList.remove('selected');
+                }
+              });
+              showToast(`识别为: ${result.name}`);
+            } else {
+              showToast('AI 未识别到物品，请手动输入', 'error');
+            }
+          } catch (err) {
+            hideLoading();
+            console.error('AI 识别失败:', err);
+            showToast('AI 识别失败，请手动输入', 'error');
+          }
+        } else {
+          // 未配置 AI，使用 Tesseract.js 基础 OCR
+          showLoading('基础文字识别中...');
+          try {
+            // 动态加载 Tesseract.js
+            if (typeof Tesseract === 'undefined') {
+              await loadTesseract();
+            }
+            
+            // 将 dataUrl 转为 blob 用于 Tesseract
+            const blob = await (await fetch(compressedDataUrl)).blob();
+            const { data: { text } } = await Tesseract.recognize(blob, 'chi_sim+eng', {
+              logger: m => {
+                if (m.status === 'recognizing text') {
+                  const pct = Math.round(m.progress * 100);
+                  document.querySelector('.loading-text').textContent = `识别中 ${pct}%`;
+                }
               }
             });
-            showToast(`识别为: ${result.name}`);
-          } else {
-            showToast('AI 未识别到物品，请手动输入', 'error');
+            hideLoading();
+            
+            // 提取识别结果中的文字（取第一行非空文字作为名称）
+            const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            if (lines.length > 0) {
+              // 取最长的有意义的行作为物品名
+              const name = lines.sort((a, b) => b.length - a.length)[0];
+              document.getElementById('addName').value = name;
+              showToast(`识别到文字: ${name}`);
+            } else {
+              showToast('未识别到文字，请手动输入', 'error');
+            }
+          } catch (err) {
+            hideLoading();
+            console.error('OCR 识别失败:', err);
+            showToast('识别失败，请手动输入', 'error');
           }
-        } catch (err) {
-          hideLoading();
-          console.error('AI 识别失败:', err);
-          showToast('识别失败，请手动输入', 'error');
         }
 
         resolve();
@@ -617,11 +659,48 @@ function compressImage(dataUrl, maxWidth = 800, quality = 0.7) {
   });
 }
 
+// 动态加载 Tesseract.js
+function loadTesseract() {
+  return new Promise((resolve, reject) => {
+    // 加载核心库
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+}
+
 function removeAddImage() {
   document.getElementById('addImagePreview').style.display = 'none';
   document.getElementById('addImagePreviewImg').src = '';
   document.getElementById('addImageData').value = '';
 }
+
+// ========================================
+// 添加物品页初始化
+// ========================================
+PageHandlers['product-add'] = async function() {
+  // 渲染分类网格
+  renderCategoryGrid('addCategoryGrid');
+  // 渲染位置下拉
+  await renderLocationSelect('addLocation');
+  // 生产日期默认当天
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('addProductionDate').value = today;
+  // 重置表单状态
+  document.getElementById('addName').value = '';
+  document.getElementById('addQuantity').value = '1';
+  document.getElementById('addShelfLife').value = '';
+  document.getElementById('addShelfLifeUnit').value = 'days';
+  document.getElementById('addNoExpiry').checked = false;
+  document.getElementById('addNotes').value = '';
+  removeAddImage();
+  // 恢复保质期输入
+  document.getElementById('addShelfLife').disabled = false;
+  document.getElementById('addShelfLifeUnit').disabled = false;
+  document.getElementById('addProductionDate').disabled = false;
+};
 
 // ========================================
 // 提交物品
@@ -686,7 +765,7 @@ async function submitProduct() {
   hideLoading();
 
   showToast('添加成功');
-  Router.navigate('products');
+  Router.navigate('manage');
 }
 
 // ========================================
@@ -700,7 +779,7 @@ PageHandlers['product-detail'] = async function() {
   const p = result.data;
   if (!p) {
     showToast('物品不存在', 'error');
-    Router.navigate('products');
+    Router.navigate('manage');
     return;
   }
 
@@ -810,7 +889,7 @@ async function deleteProduct(id) {
   hideLoading();
   
   showToast('删除成功');
-  Router.navigate('products');
+  Router.navigate('manage');
 }
 
 // ========================================
@@ -824,7 +903,7 @@ PageHandlers['product-edit'] = async function() {
   const p = result.data;
   if (!p) {
     showToast('物品不存在', 'error');
-    Router.navigate('products');
+    Router.navigate('manage');
     return;
   }
 
